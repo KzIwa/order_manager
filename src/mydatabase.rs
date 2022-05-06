@@ -1,8 +1,8 @@
 use chrono::prelude::*;
 use rusqlite::{params, Connection, Error};
-use std::path::Path;
+use std::{path::Path, result};
 // 一時的にデータを保持して扱いやすくするための構造体
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 
 pub struct PartsItem {
     pub db_id: i32,
@@ -12,7 +12,7 @@ pub struct PartsItem {
     pub rev_mark: String,
     pub name: String,
     pub itemtype: String,
-    pub model:String,
+    pub model: String,
     pub maker: String,
     pub itemqty: i32,
     pub remarks: String,
@@ -47,9 +47,13 @@ pub fn createsql(savepath: &Path) -> Result<(), Error> {
         price INTERGER
     )",
         [],
-    ){
-        Ok(num)=>{println!("Database created {}",num)},
-        Err(error)=>{println!("create error {}",error)}
+    ) {
+        Ok(num) => {
+            println!("Database created {}", num)
+        }
+        Err(error) => {
+            println!("create error {}", error)
+        }
     }
     Ok(())
 }
@@ -72,7 +76,7 @@ fn check_dupe(savepath: &Path, item: &PartsItem) -> Result<Vec<PartsItem>, Error
                 rev_mark: row.get(4)?,
                 name: row.get(5)?,
                 itemtype: row.get(6)?,
-                model:row.get(7)?,
+                model: row.get(7)?,
                 maker: row.get(8)?,
                 itemqty: row.get(9)?,
                 remarks: row.get(10)?,
@@ -149,75 +153,93 @@ pub fn insertsql(savepath: &Path, partsitem: Vec<PartsItem>) -> Result<(), Error
 pub fn updatesql(savepath: &Path, item: &PartsItem) {
     todo!()
 }
-pub fn order_readsql(savepath: &Path, orderno: &str,itemtype:&str) -> Result<Vec<PartsItem>, Error> {
+pub fn order_readsql(
+    savepath: &Path,
+    orderno: &str,
+    itemtype: &str,
+    unitno: &str,
+    searchword:&str,
+) -> Result<Vec<PartsItem>, Error> {
     let conn = Connection::open(savepath)?;
     let mut result: Vec<PartsItem> = Vec::new();
-    if matches!(orderno, "" | "*") {
-        let mut state = conn.prepare("SELECT * From partstable WHERE itemtype == ?")?;
-        let partsitem_iter = state.query_map(params![itemtype], |row| {
-            Ok(PartsItem {
-                db_id: row.get(0)?,
-                order_no: row.get(1)?,
-                unit_no: row.get(2)?,
-                parts_no: row.get(3)?,
-                rev_mark: row.get(4)?,
-                name: row.get(5)?,
-                itemtype: row.get(6)?,
-                model:row.get(7)?,
-                maker: row.get(8)?,
-                itemqty: row.get(9)?,
-                remarks: row.get(10)?,
-                condition: row.get(11)?,
-                vender: row.get(12)?,
-                order_date: row.get(13)?,
-                delivery_date: row.get(14)?,
-                delicondition: row.get(15)?,
-                price: row.get(16)?,
-            })
-        })?;
+    let mut state = conn.prepare("SELECT * From partstable WHERE itemtype == ?")?;
+    let partsitem_iter = state.query_map(params![itemtype], |row| {
+        Ok(PartsItem {
+            db_id: row.get(0)?,
+            order_no: row.get(1)?,
+            unit_no: row.get(2)?,
+            parts_no: row.get(3)?,
+            rev_mark: row.get(4)?,
+            name: row.get(5)?,
+            itemtype: row.get(6)?,
+            model: row.get(7)?,
+            maker: row.get(8)?,
+            itemqty: row.get(9)?,
+            remarks: row.get(10)?,
+            condition: row.get(11)?,
+            vender: row.get(12)?,
+            order_date: row.get(13)?,
+            delivery_date: row.get(14)?,
+            delicondition: row.get(15)?,
+            price: row.get(16)?,
+        })
+    })?;
 
-        for item in partsitem_iter {
-            // println!("{:?}", item?);
-            match item {
-                Ok(it)=>    result.push(it),
-                _=>()
-            }
+    for item in partsitem_iter {
+        match item {
+            Ok(it) => result.push(it),
+            _ => (),
         }
-        Ok(result)
-    } else {
-        let mut state = conn.prepare("SELECT * From partstable WHERE order_no == ?")?;
-        let partsitem_iter = state.query_map(params![orderno], |row| {
-            Ok(PartsItem {
-                db_id: row.get(0)?,
-                order_no: row.get(1)?,
-                unit_no: row.get(2)?,
-                parts_no: row.get(3)?,
-                rev_mark: row.get(4)?,
-                name: row.get(5)?,
-                itemtype: row.get(6)?,
-                model:row.get(7)?,
-                maker: row.get(8)?,
-                itemqty: row.get(9)?,
-                remarks: row.get(10)?,
-                condition: row.get(11)?,
-                vender: row.get(12)?,
-                order_date: row.get(13)?,
-                delivery_date: row.get(14)?,
-                delicondition: row.get(15)?,
-                price: row.get(16)?,
-            })
-        })?;
-
-        for item in partsitem_iter {
-            match item {
-                Ok(it)=>    result.push(it),
-                _=>()
-            }
-        }
-        Ok(result)
     }
+    let result = select_order(orderno.trim(), result);
+    let result = select_unit(unitno.trim_end(), result);
+    let result = search_word(searchword.trim(), result);
+    Ok(result)
 }
 
+fn select_order(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
+    if pat == "" {
+        return parts;
+    }
+    let mut result: Vec<PartsItem> = Vec::new();
+    for it in parts.iter() {
+        if it.order_no.contains(pat) {
+            result.push(it.clone());
+        }
+    }
+    result
+}
+fn select_unit(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
+    if pat == "" {
+        return parts;
+    }
+    let mut result: Vec<PartsItem> = Vec::new();
+    for it in parts.iter() {
+        if it.unit_no.to_string().as_str() == pat {
+            result.push(it.clone());
+        }
+    }
+    result
+}
+
+fn search_word(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
+    if pat == "" {
+        return parts;
+    }
+    let mut result: Vec<PartsItem> = Vec::new();
+    for it in parts.iter() {
+        if it.order_no.contains(pat)
+            || it.name.contains(pat)
+            || it.model.contains(pat)
+            || it.maker.contains(pat)
+            || it.remarks.contains(pat)
+            || it.vender.contains(pat)
+        {
+            result.push(it.clone());
+        }
+    }
+    result
+}
 fn string_to_time(st: &str) -> Option<DateTime<FixedOffset>> {
     let result = DateTime::parse_from_str(st, "%Y/%m/%d %H:%M:%S");
     match result {

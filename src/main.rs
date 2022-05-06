@@ -1,4 +1,4 @@
-// #![windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
 extern crate native_windows_derive as nwd;
 extern crate native_windows_gui as nwg;
 mod mydatabase;
@@ -6,8 +6,12 @@ mod myexcelread;
 
 use anyhow::{Error, Result};
 use nwd::{NwgPartial, NwgUi};
+use nwg::stretch::{
+    geometry::{Rect, Size},
+    style::{AlignSelf, Dimension, FlexDirection},
+};
 use nwg::NativeUi;
-use std::env;
+use std::{env, f32::consts::E};
 
 use chrono::{DateTime, FixedOffset, Local};
 use glob::glob;
@@ -18,7 +22,7 @@ use std::path::Path;
 
 fn main() -> Result<()> {
     // 年毎にデータベースを作成し年で選択する
-    let selectyear = 2021;
+    let selectyear = 2019;
     let dbfolder = "C:\\Database";
     match fs::read_dir(dbfolder) {
         Ok(_) => {}
@@ -45,7 +49,10 @@ fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> Result<PartsIte
             None => ordername.to_string(),
         },
         unit_no: data[0].parse::<i32>()?,
-        parts_no: data[2].to_string(),
+        parts_no: match data[2].to_string().split_once("-") {
+            Some(pno) => pno.1.to_string(),
+            None => data[2].to_string(),
+        },
         rev_mark: data[3].to_string(),
         name: data[4].to_string(),
         itemtype: data[1].to_string(),
@@ -105,7 +112,7 @@ fn guiapp() {
     nwg::init().expect("Failed to init Native Windows GUI");
     nwg::Font::set_global_family("Segoe UI").expect("Failed to set default font");
 
-    let mut window = Default::default();
+    let window = Default::default();
     let _app = DataViewApp::build_ui(window).expect("Failed to build UI");
     nwg::dispatch_thread_events();
 }
@@ -113,65 +120,96 @@ fn guiapp() {
 #[derive(Default, NwgUi)]
 pub struct DataViewApp {
     // マクロを使ってwindow 構成を生成している
-    #[nwg_control(size:(1700,500), position: (300, 300), title: "部品管理",flags:"WINDOW|VISIBLE")]
-    #[nwg_events( OnWindowClose: [DataViewApp::exit], OnInit: [DataViewApp::load_data])]
+    #[nwg_control(size:(1500,500), position: (300, 300), title: "部品管理")]
+    #[nwg_events( OnWindowClose:[DataViewApp::exit],OnInit: [DataViewApp::load_data])]
     window: nwg::Window,
 
     #[nwg_resource(family: "Meiryo", size: 19)]
     appfont: nwg::Font,
 
     // レイアウト管理
-    #[nwg_layout(parent: window,spacing:2,min_size:[50,150])]
+    #[nwg_layout(parent:window,max_row:Some(14),spacing:3)]
     mylayout: nwg::GridLayout,
 
-    #[nwg_control(item_count: 16, size: (800, 500), list_style: nwg::ListViewStyle::Detailed, focus: true,
-        ex_flags: nwg::ListViewExFlags::GRID | nwg::ListViewExFlags::FULL_ROW_SELECT, )]
-    #[nwg_layout_item(layout: mylayout, col: 0, col_span: 4, row: 0, row_span: 10)]
-    #[nwg_events(OnListViewClick:[DataViewApp::getlistitem],OnKeyRelease:[DataViewApp::getlistitem])]
+    // 部品リスト
+    #[nwg_control(item_count: 16,list_style:nwg::ListViewStyle::Detailed,
+        ex_flags: nwg::ListViewExFlags::AUTO_COLUMN_SIZE | nwg::ListViewExFlags::FULL_ROW_SELECT)]
+    #[nwg_layout_item(layout: mylayout,col: 0, col_span: 5, row: 0, row_span: 13)]
+    #[nwg_events(OnListViewClick:[DataViewApp::getlistitem])]
     data_view: nwg::ListView,
 
-    #[nwg_control(text: "Year",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 1, row_span: 1)]
-    yearlabel: nwg::Label,
-    #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 2, row_span: 1)]
-    #[nwg_events()]
-    year_edit: nwg::TextInput,
-
+    // 購入加工選択ボックス
     #[nwg_control(collection: vec!["購入", "加工"], selected_index: Some(0), font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 0)]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 0)]
     #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
     partstype: nwg::ComboBox<&'static str>,
+
+    // 年度
+    #[nwg_control(text: "年代",font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 1)]
+    yearlabel: nwg::Label,
+    #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 2)]
+    #[nwg_events()]
+    year_input: nwg::TextInput,
 
     // 購入加工の状態保持無限ループを防ぐ 状態フラグ["購入", "加工"]
     #[nwg_control(text: "")]
     typelabel: nwg::Label,
 
+    // 注文番号
     #[nwg_control(text: "注文番号",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 3)]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 3)]
     orderlabel: nwg::Label,
 
     #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 4, row_span: 1)]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 4, row_span: 1)]
     #[nwg_events()]
-    order_edit: nwg::TextInput,
+    order_input: nwg::TextInput,
 
-    #[nwg_control(text: "検索語",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 5)]
-    searchlabel: nwg::Label,
-
+    #[nwg_control(text: "枝番号",font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 5)]
+    unitlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 6, row_span: 1)]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 6, row_span: 1)]
+    #[nwg_events()]
+    unit_input: nwg::TextInput,
+    // 検索語
+    #[nwg_control(text: "検索語",font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 8)]
+    searchlabel: nwg::Label,
+    #[nwg_control(text: "",font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 9)]
     search_edit: nwg::TextInput,
-
+    // 検索ボタン
     #[nwg_control(text:"Search",size:(270,40))]
-    #[nwg_layout_item(layout:mylayout,col:4,row:7)]
+    #[nwg_layout_item(layout:mylayout,col:5,row:10)]
     #[nwg_events(OnButtonClick:[DataViewApp::set_listdatabase])]
-    seach_btn: nwg::Button,
+    search_btn: nwg::Button,
 
+    // クリアボタン
+    #[nwg_control(text:"Clear",size:(270,40))]
+    #[nwg_layout_item(layout:mylayout,col:5,row:11)]
+    #[nwg_events(OnButtonClick:[DataViewApp::clear_all])]
+    clear_btn: nwg::Button,
+
+    // 合計金額
+    #[nwg_control(text: "合計金額",font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 12)]
+    grosslabel: nwg::Label,
+    #[nwg_control(text: "----",font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 13)]
+    grossprice: nwg::Label,
+
+    // ステータスバー
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 8)]
+    #[nwg_layout_item(layout: mylayout, col: 1, row: 13)]
     statuslabel: nwg::Label,
+    // Reloadボタン
+    #[nwg_control(text:"Reload",size:(270,40))]
+    #[nwg_layout_item(layout:mylayout,col:0,row:13)]
+    #[nwg_events(OnButtonClick:[DataViewApp::reload_database])]
+    reload_btn: nwg::Button,
 }
 
 impl DataViewApp {
@@ -180,9 +218,9 @@ impl DataViewApp {
         // 状態フラグなので見えないようにしている
         self.typelabel.set_visible(false);
         // リストビューの初期セッティング
-        dataview.insert_column("Order no");
-        dataview.insert_column("Unit no");
-        dataview.insert_column("Parts no");
+        dataview.insert_column("注番");
+        dataview.insert_column("枝番");
+        dataview.insert_column("番号");
         dataview.insert_column("部品名称");
         dataview.insert_column("材質/型式");
         dataview.insert_column("処理/メーカ");
@@ -198,6 +236,44 @@ impl DataViewApp {
         dataview.insert_column("SQL_ID");
         dataview.set_headers_enabled(true);
         self.konyu_data()
+    }
+
+    fn get_database_path(&self, selectyear: i32) -> String {
+        let dbfolder = "C:\\Database";
+        format!("{}\\parts{}.db3", dbfolder, selectyear)
+    }
+
+    fn clear_all(&self) {
+        self.search_edit.set_text("");
+        self.unit_input.set_text("");
+        self.order_input.set_text("");
+    }
+    fn reload_database(&self) {
+        let selectyear = self.year_input.text().parse::<i32>();
+        match selectyear {
+            Ok(n) => {
+                if 2019 <= n && n <= 2030 {
+                    ()
+                } else {
+                    return self
+                        .statuslabel
+                        .set_text("年代に数値を正しく入力してください");
+                }
+            }
+            Err(_) => self
+                .statuslabel
+                .set_text("年代に数値を正しく入力してください"),
+        }
+        match selectyear {
+            Ok(num) => {
+                self.statuslabel.set_text("データベースを作成中です");
+                let dpath = self.get_database_path(num);
+                let databasepath = Path::new(dpath.as_str());
+                read_excel_files(num, databasepath).ok();
+                self.statuslabel.set_text("データベースを作成しました。")
+            }
+            _ => (),
+        }
     }
 
     fn parse_data(&self) {
@@ -242,56 +318,60 @@ impl DataViewApp {
     }
     fn read_database(&self) -> Result<()> {
         let dataview = &self.data_view;
+        let mut grossprice = 0;
         dataview.clear();
-        let selectyear = self.year_edit.text();
-        self.search_edit.set_text(selectyear.as_str());
-        let yearnum = selectyear.parse::<i32>();
+        let selectyear = self.year_input.text();
+        let yearnum = selectyear.parse::<i32>()?;
         let selectedtype = self.partstype.selection_string().unwrap();
-
-        match yearnum {
-            Ok(n) => {
-                if 2019 < n && n < 2030 {
-                    ()
-                }
-            }
-            Err(_) => return Ok(()),
+        if 2019 <= yearnum && yearnum < 2030 {
+            ()
+        } else {
+            self.statuslabel
+                .set_text("年代は2019～2030の値を入力してください");
+            return Ok(());
         }
-
-        let dbfolder = "C:\\Database";
-        let selectdir = format!("{}\\parts{}.db3", dbfolder, selectyear);
+        let select_order = self.order_input.text();
+        let search_word = self.search_edit.text();
+        let selectdir = self.get_database_path(yearnum);
+        let selectunit = self.unit_input.text();
         let databasepath = Path::new(selectdir.as_str());
-        let contents = order_readsql(databasepath, "",&selectedtype)?;
-        self.search_edit
-            .set_text(format!("{}", contents.len()).as_str());
+        let contents = order_readsql(
+            databasepath,
+            &select_order,
+            &selectedtype,
+            &selectunit,
+            &search_word,
+        )?;
+   
+        self.statuslabel
+            .set_text(format!("{}件の該当項目があります", contents.len()).as_str());
         for (indexnum, items) in contents.iter().enumerate() {
-                let toitem = vec![
-                    items.order_no.to_string(),
-                    items.unit_no.to_string(),
-                    items.parts_no.to_string(),
-                    items.name.to_string(),
-                    items.model.to_string(),
-                    items.maker.to_string(),
-                    items.itemqty.to_string(),
-                    items.remarks.to_string(),
-                    items.condition.to_string(),
-                    items.vender.to_string(),
-                    items.order_date.to_string(),
-                    items.delivery_date.to_string(),
-                    items.delicondition.to_string(),
-                    items.price.to_string(),
-                ];
-                self.set_item(indexnum as i32, &toitem);
-        }
-        dataview.select_item(0, true);
-        Ok(())
-    }
-
-    fn addread_database(&self, partsitem: &Vec<PartsItem>) {
-        let testdata = vec![("1", "2temp"), ("2", "test"), ("3", "mdo")];
-        for (indexnum, items) in testdata.iter().enumerate() {
-            let toitem = vec![items.0.to_string(), items.1.to_string()];
+            let gpartprice = items.price * items.itemqty;
+            grossprice += gpartprice;
+            let toitem = vec![
+                items.order_no.to_string(),
+                items.unit_no.to_string(),
+                items.parts_no.to_string(),
+                items.name.to_string(),
+                items.model.to_string(),
+                items.maker.to_string(),
+                items.itemqty.to_string(),
+                items.remarks.to_string(),
+                items.condition.to_string(),
+                items.vender.to_string(),
+                items.order_date.to_string(),
+                items.delivery_date.to_string(),
+                items.delicondition.to_string(),
+                items.price.to_string(),
+                gpartprice.to_string(),
+                items.db_id.to_string(),
+            ];
             self.set_item(indexnum as i32, &toitem);
         }
+        self.grossprice.set_text(grossprice.to_string().as_str());
+        // リストを選択状態にする
+        dataview.select_item(0, true);
+        Ok(())
     }
 
     fn set_item<T: ToString>(&self, indexnum: i32, listdata: &Vec<T>) {
@@ -313,12 +393,13 @@ impl DataViewApp {
     fn getlistitem(&self) {
         let listview = &self.data_view;
         // get row
-        let selectnum = listview.selected_item();
-        match selectnum {
-            Some(num) => {
-                let items = listview.item(num, 1, 20).unwrap().text;
-                self.search_edit.set_text(&items);
-                listview.select_item(num, true);
+        let selectrow = listview.selected_item();
+
+        match selectrow {
+            Some(row) => {
+                let items = listview.item(row, 0, 20).unwrap().text;
+                self.order_input.set_text(&items);
+                // listview.select_item(row, true);
             }
             None => (),
         }
