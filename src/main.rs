@@ -1,28 +1,25 @@
 #![windows_subsystem = "windows"]
 extern crate native_windows_derive as nwd;
 extern crate native_windows_gui as nwg;
+
 mod mydatabase;
 mod myexcelread;
 
-use anyhow::{Error, Result};
-use nwd::{NwgPartial, NwgUi};
-use nwg::stretch::{
-    geometry::{Rect, Size},
-    style::{AlignSelf, Dimension, FlexDirection},
-};
-use nwg::NativeUi;
-use std::{env, f32::consts::E};
+use anyhow::Result;
+use nwd::NwgUi;
 
-use chrono::{DateTime, FixedOffset, Local};
+use nwg::NativeUi;
+use std::env;
+
+// use chrono::{DateTime, FixedOffset, Local};
 use glob::glob;
-use mydatabase::{createsql, insertsql, order_readsql, PartsItem};
+use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
 use std::fs;
 use std::path::Path;
 
 fn main() -> Result<()> {
     // 年毎にデータベースを作成し年で選択する
-    let selectyear = 2019;
     let dbfolder = "C:\\Database";
     match fs::read_dir(dbfolder) {
         Ok(_) => {}
@@ -30,50 +27,85 @@ fn main() -> Result<()> {
             fs::create_dir(dbfolder).unwrap();
         }
     }
-    // fs::create_dir("C:\\Database");
-    let selectdir = format!("{}\\parts{}.db3", dbfolder, selectyear);
-    let databasepath = Path::new(selectdir.as_str());
-    createsql(databasepath)?;
-
     guiapp();
-
-    // read_excel_files(selectyear,databasepath)?;
     Ok(())
 }
+fn pretty_print_int(i: i32) -> String {
+    // 千の桁カンマ区切りで文字列を返す
+    let mut s = String::new();
+    let i_str = i.to_string();
 
-fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> Result<PartsItem> {
-    Ok(PartsItem {
+    let a = i_str.chars().rev().enumerate();
+
+    for (idx, val) in a {
+        if idx != 0 && idx % 3 == 0 {
+            s.insert(0, ',');
+        }
+        s.insert(0, val);
+    }
+    s
+}
+
+fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> PartsItem {
+    let getext = |x: usize| {
+        if data.len() < x + 1 {
+            "".to_string()
+        } else {
+            data[x].to_string()
+        }
+    };
+    PartsItem {
         db_id: 0,
         order_no: match ordername.split_once("-") {
             Some(name) => name.0.to_string(),
             None => ordername.to_string(),
         },
-        unit_no: data[0].parse::<i32>()?,
-        parts_no: match data[2].to_string().split_once("-") {
-            Some(pno) => pno.1.to_string(),
-            None => data[2].to_string(),
-        },
-        rev_mark: data[3].to_string(),
-        name: data[4].to_string(),
-        itemtype: data[1].to_string(),
-        model: data[5].to_string(),
-        maker: data[6].to_string(),
-        itemqty: data[7].parse::<i32>()?,
-        remarks: data[8].to_string(),
-        condition: data[9].to_string(),
-        vender: data[10].to_string(),
-        order_date: "".to_string(),
-        delivery_date: "".to_string(),
-        delicondition: "".to_string(),
-        price: match data[11].parse::<i32>() {
+        unit_no: match getext(0).parse::<i32>() {
             Ok(num) => num,
             _ => 0,
         },
-    })
+        parts_no: match getext(2).split_once("-") {
+            Some(pno) => pno.1.to_string(),
+            None => getext(2),
+        },
+        rev_mark: getext(3),
+        name: getext(4),
+        itemtype: getext(1),
+        model: getext(5),
+        maker: getext(6),
+        itemqty: match getext(7).parse::<i32>() {
+            Ok(num) => num,
+            _ => 0,
+        },
+        remarks: getext(8),
+        condition: getext(9),
+        vender: getext(10),
+        order_date: getext(13),
+        delivery_date: getext(14),
+        delicondition: getext(15),
+        price: match getext(11).parse::<i32>() {
+            Ok(num) => num,
+            _ => 0,
+        },
+    }
 }
-fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<()> {
-    let selectdir = format!("\\\\LS220DB3C9\\share\\発注管理\\{}\\", selectyear);
+fn delete_db_file(datapath: &Path) -> Result<()> {
+    fs::remove_file(datapath)?;
+    Ok(())
+}
+fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
+    // エクセルファイルを検索してデータベースへ登録する
+    let selectdir: String;
+    delete_db_file(datapath)?;
+    if selectyear == 0 {
+        selectdir = format!("D:\\Data\\Excelbackup\\");
+    } else {
+        selectdir = format!("\\\\LS220DB3C9\\share\\発注管理\\{}\\", selectyear);
+    }
+    createtable(datapath)?;
+    let mut counter = 0;
     let currentpath = Path::new(selectdir.as_str());
+    let mut getitems: Vec<PartsItem> = Vec::new();
     match env::set_current_dir(currentpath) {
         Ok(_) => {
             for partype in ["購入", "加工"].into_iter() {
@@ -81,20 +113,21 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<()> {
                 let targetfiles = glob(&pattern).expect("cannot find excel file");
                 for itemname in targetfiles {
                     let excelname = itemname.expect("can not open excel file");
+                    // println!("{:?}", excelname);
+
                     match readexcel(&excelname) {
                         Ok(datavec) => {
                             let mut insert_items: Vec<PartsItem> = Vec::new();
                             for dt in datavec.iter() {
                                 let ordername = excelname.file_name().unwrap().to_str().unwrap();
-                                let data = excelvec_to_partsitem(ordername, dt);
-                                match data {
-                                    Ok(item) => {
-                                        insert_items.push(item);
-                                    }
-                                    _ => (),
-                                }
+
+                                let item = excelvec_to_partsitem(ordername, dt);
+
+                                insert_items.push(item);
                             }
-                            insertsql(datapath, insert_items).ok();
+                            counter += &insert_items.len();
+                            getitems.extend(insert_items);
+                            // let instnum = insertsql(datapath, insert_items)?;
                         }
                         _ => (),
                     }
@@ -105,13 +138,20 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<()> {
             println!("{}", e);
         }
     };
-    Ok(())
+    insertsql(datapath, getitems)?;
+    Ok(counter)
 }
 
 fn guiapp() {
     nwg::init().expect("Failed to init Native Windows GUI");
-    nwg::Font::set_global_family("Segoe UI").expect("Failed to set default font");
-
+    // nwg::Font::set_global_family("MS UI Gothic").expect("Failed to set default font");
+    let mut defaultfont = nwg::Font::default();
+    nwg::Font::builder()
+        .size(14)
+        .family("MS UI Gotic")
+        .build(&mut defaultfont)
+        .expect("Failed to set default font");
+    nwg::Font::set_global_default(Some(defaultfont));
     let window = Default::default();
     let _app = DataViewApp::build_ui(window).expect("Failed to build UI");
     nwg::dispatch_thread_events();
@@ -138,11 +178,11 @@ pub struct DataViewApp {
     #[nwg_events(OnListViewClick:[DataViewApp::getlistitem])]
     data_view: nwg::ListView,
 
-    // 購入加工選択ボックス
-    #[nwg_control(collection: vec!["購入", "加工"], selected_index: Some(0), font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 0)]
-    #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
-    partstype: nwg::ComboBox<&'static str>,
+    // google search
+    #[nwg_control(text:"Google Search",size:(270,40))]
+    #[nwg_layout_item(layout:mylayout,col:5,row:0)]
+    #[nwg_events(OnButtonClick:[DataViewApp::google_search])]
+    google_btn: nwg::Button,
 
     // 年度
     #[nwg_control(text: "年代",font: Some(&data.appfont))]
@@ -174,6 +214,13 @@ pub struct DataViewApp {
     #[nwg_layout_item(layout: mylayout, col: 5, row: 6, row_span: 1)]
     #[nwg_events()]
     unit_input: nwg::TextInput,
+
+    // 購入加工選択ボックス
+    #[nwg_control(collection: vec!["購入", "加工"], selected_index: Some(0), font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 7)]
+    #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
+    partstype: nwg::ComboBox<&'static str>,
+
     // 検索語
     #[nwg_control(text: "検索語",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 5, row: 8)]
@@ -181,6 +228,7 @@ pub struct DataViewApp {
     #[nwg_control(text: "",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 5, row: 9)]
     search_edit: nwg::TextInput,
+
     // 検索ボタン
     #[nwg_control(text:"Search",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col:5,row:10)]
@@ -201,10 +249,14 @@ pub struct DataViewApp {
     #[nwg_layout_item(layout: mylayout, col: 5, row: 13)]
     grossprice: nwg::Label,
 
-    // ステータスバー
+    // ステータスバー1
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 1, row: 13)]
-    statuslabel: nwg::Label,
+    statuslabel1: nwg::Label,
+    // ステータスバー2
+    #[nwg_control(text: "Status",font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 4, row: 13)]
+    statuslabel2: nwg::Label,
     // Reloadボタン
     #[nwg_control(text:"Reload",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col:0,row:13)]
@@ -233,7 +285,7 @@ impl DataViewApp {
         dataview.insert_column("入荷済み");
         dataview.insert_column("単価");
         dataview.insert_column("金額");
-        dataview.insert_column("SQL_ID");
+        // dataview.insert_column("SQL_ID");
         dataview.set_headers_enabled(true);
         self.konyu_data()
     }
@@ -249,36 +301,40 @@ impl DataViewApp {
         self.order_input.set_text("");
     }
     fn reload_database(&self) {
-        let selectyear = self.year_input.text().parse::<i32>();
+        let selectyear = self.year_input.text().trim().parse::<i32>();
+        // 範囲外の年代の入力に対するガードパターン
         match selectyear {
             Ok(n) => {
-                if 2019 <= n && n <= 2030 {
+                if 2019 <= n && n <= 2035 {
                     ()
                 } else {
                     return self
-                        .statuslabel
+                        .statuslabel1
                         .set_text("年代に数値を正しく入力してください");
                 }
             }
             Err(_) => self
-                .statuslabel
+                .statuslabel1
                 .set_text("年代に数値を正しく入力してください"),
         }
+
         match selectyear {
             Ok(num) => {
-                self.statuslabel.set_text("データベースを作成中です");
+                self.statuslabel1.set_text("データベースを作成中です");
                 let dpath = self.get_database_path(num);
                 let databasepath = Path::new(dpath.as_str());
-                read_excel_files(num, databasepath).ok();
-                self.statuslabel.set_text("データベースを作成しました。")
+                match read_excel_files(num, databasepath) {
+                    Ok(getitems) => {
+                        let statustext = format!("{}件をデータベースに登録しました", getitems);
+                        self.statuslabel1.set_text(&statustext);
+                    }
+                    Err(_) => (),
+                };
             }
             _ => (),
         }
     }
 
-    fn parse_data(&self) {
-        todo!()
-    }
     fn konyu_data(&self) {
         self.typelabel.set_text("購入");
         self.data_view.update_column(4, "型式");
@@ -301,10 +357,10 @@ impl DataViewApp {
                 }
             }
             Some("加工") => {
-                if self.typelabel.text() != "加工" {
-                    self.kakou_data(); //状態ラベルを切換
-                    self.set_listdatabase()
-                }
+                // if self.typelabel.text() != "加工" {
+                self.kakou_data(); //状態ラベルを切換
+                self.set_listdatabase()
+                // }
             }
             None | Some(_) => (),
         }
@@ -313,28 +369,32 @@ impl DataViewApp {
     fn set_listdatabase(&self) {
         match self.read_database() {
             Ok(_) => (),
-            Err(e) => self.statuslabel.set_text(e.to_string().as_str()),
+            Err(e) => self.statuslabel1.set_text(e.to_string().as_str()),
         }
     }
     fn read_database(&self) -> Result<()> {
+        self.statuslabel1.set_text("");
+        self.statuslabel2.set_text("");
         let dataview = &self.data_view;
         let mut grossprice = 0;
         dataview.clear();
         let selectyear = self.year_input.text();
         let yearnum = selectyear.parse::<i32>()?;
         let selectedtype = self.partstype.selection_string().unwrap();
-        if 2019 <= yearnum && yearnum < 2030 {
+        if (2019 <= yearnum && yearnum <= 2035) || yearnum == 0 {
             ()
         } else {
-            self.statuslabel
-                .set_text("年代は2019～2030の値を入力してください");
+            self.statuslabel1
+                .set_text("年代は2019～2035の値を入力してください");
             return Ok(());
         }
+        // gui から 検索キーワードを取得
         let select_order = self.order_input.text();
         let search_word = self.search_edit.text();
         let selectdir = self.get_database_path(yearnum);
         let selectunit = self.unit_input.text();
         let databasepath = Path::new(selectdir.as_str());
+        // アイテムを絞り込み検索
         let contents = order_readsql(
             databasepath,
             &select_order,
@@ -342,12 +402,20 @@ impl DataViewApp {
             &selectunit,
             &search_word,
         )?;
-   
-        self.statuslabel
+
+        self.statuslabel1
             .set_text(format!("{}件の該当項目があります", contents.len()).as_str());
+        let mut has_zero = false;
+
+        // guiにアイテムをセット
         for (indexnum, items) in contents.iter().enumerate() {
             let gpartprice = items.price * items.itemqty;
+            if gpartprice == 0 && items.name.trim() != "欠番" && !items.remarks.contains("支給品")
+            {
+                has_zero = true
+            }
             grossprice += gpartprice;
+
             let toitem = vec![
                 items.order_no.to_string(),
                 items.unit_no.to_string(),
@@ -362,32 +430,42 @@ impl DataViewApp {
                 items.order_date.to_string(),
                 items.delivery_date.to_string(),
                 items.delicondition.to_string(),
-                items.price.to_string(),
-                gpartprice.to_string(),
-                items.db_id.to_string(),
+                pretty_print_int(items.price),
+                pretty_print_int(gpartprice),
+                // items.db_id.to_string(),
             ];
-            self.set_item(indexnum as i32, &toitem);
+
+            self.setlist_item(indexnum as i32, toitem);
+            let listlimit = 5000;
+            if indexnum > listlimit {
+                self.statuslabel1
+                    .set_text(format!("{}件までを表示しています。", listlimit).as_str());
+                break;
+            }
         }
-        self.grossprice.set_text(grossprice.to_string().as_str());
+
+        if has_zero {
+            self.statuslabel2.set_text("合計金額は不正確の可能性あり")
+        }
+        let gokeikingaku = format!("￥ {}", pretty_print_int(grossprice));
+        self.grossprice.set_text(&gokeikingaku);
         // リストを選択状態にする
         dataview.select_item(0, true);
         Ok(())
     }
 
-    fn set_item<T: ToString>(&self, indexnum: i32, listdata: &Vec<T>) {
-        let itemdata: Vec<String> = listdata.iter().map(|x| x.to_string()).collect();
+    fn setlist_item<T: ToString>(&self, indexnum: i32, listdata: Vec<T>) {
+        // GUIの表の構成
         let dataview = &self.data_view;
-
-        for (colnum, itemtext) in itemdata.iter().enumerate() {
+        for (colnum, itemtext) in listdata.iter().enumerate() {
             let listdata = nwg::InsertListViewItem {
                 index: Some(indexnum),
                 column_index: colnum as i32,
-                text: Some(itemtext.into()),
+                text: Some(itemtext.to_string()),
                 image: None,
             };
             dataview.insert_item(listdata)
         }
-        self.update_view()
     }
 
     fn getlistitem(&self) {
@@ -399,13 +477,46 @@ impl DataViewApp {
             Some(row) => {
                 let items = listview.item(row, 0, 20).unwrap().text;
                 self.order_input.set_text(&items);
+                let model = listview.item(row, 4, 20).unwrap().text;
+                let maker = listview.item(row, 5, 20).unwrap().text;
+                self.statuslabel1
+                    .set_text(format!("{}: {}", maker, model).as_str());
                 // listview.select_item(row, true);
             }
             None => (),
         }
     }
 
+    fn google_search(&self) {
+        let listview = &self.data_view;
+        let selectrow = listview.selected_item();
+        match selectrow {
+            Some(row) => {
+                let model = listview.item(row, 4, 30).unwrap().text;
+                let maker = listview.item(row, 5, 20).unwrap().text;
+                let searchword = format!("{} {}", model, maker);
+                let open_url = format!("https://www.google.com/search?q={}", searchword);
+                webbrowser::open(&open_url).unwrap();
+                self.statuslabel1
+                    .set_text(format!("{}をWEB検索", searchword).as_str());
+            }
+            None => self
+                .statuslabel1
+                .set_text("検索エラー:アイテムを選択してください"),
+        }
+    }
     fn exit(&self) {
         nwg::stop_thread_dispatch();
     }
+}
+
+#[test]
+fn pretty_print_test() {
+    assert_eq!(&pretty_print_int(0), "0");
+    assert_eq!(&pretty_print_int(1), "1");
+    assert_eq!(&pretty_print_int(200), "200");
+    assert_eq!(&pretty_print_int(1000), "1,000");
+    assert_eq!(&pretty_print_int(50000), "50,000");
+    assert_eq!(&pretty_print_int(900000), "900,000");
+    assert_eq!(&pretty_print_int(1900000), "1,900,000");
 }
