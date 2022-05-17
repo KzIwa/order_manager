@@ -59,14 +59,11 @@ pub fn createtable(savepath: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-
-
-pub fn insertsql(savepath: &Path, partsitem: Vec<PartsItem>) -> Result<usize, Error> {
+pub fn insertsql(savepath: &Path, partsitem: Box<Vec<PartsItem>>) -> Result<usize, Error> {
     // Vecで受け取ったアイテムを指定されたPathのデータベースへ登録する
     let conn = Connection::open(savepath)?;
     let mut counter = 0;
     for item in partsitem.iter() {
-
         // println!("{:?}", item);
         counter += 1;
         let statement = "INSERT INTO partstable(
@@ -113,17 +110,15 @@ pub fn insertsql(savepath: &Path, partsitem: Vec<PartsItem>) -> Result<usize, Er
     Ok(counter)
 }
 
-
-
 pub fn order_readsql(
     savepath: &Path,
     orderno: &str,
     itemtype: &str,
     unitno: &str,
     searchword: &str,
-) -> Result<Vec<PartsItem>, Error> {
+) -> Result<Box<Vec<Box<PartsItem>>>, Error> {
     let conn = Connection::open(savepath)?;
-    let mut result: Vec<PartsItem> = Vec::new();
+    let mut result: Box<Vec<Box<PartsItem>>> = Box::new(Vec::new());
     let mut state = conn.prepare("SELECT * From partstable WHERE itemtype == ?")?;
     let partsitem_iter = state.query_map(params![itemtype], |row| {
         Ok(PartsItem {
@@ -149,7 +144,10 @@ pub fn order_readsql(
 
     for item in partsitem_iter {
         match item {
-            Ok(it) => result.push(it),
+            Ok(it) => {
+                let item = Box::new(it);
+                result.push(item)
+            }
             _ => (),
         }
     }
@@ -159,37 +157,43 @@ pub fn order_readsql(
     Ok(result)
 }
 
-fn select_order(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
+fn select_order(pat: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box<PartsItem>>> {
     if pat == "" {
         return parts;
     }
-    let mut result: Vec<PartsItem> = Vec::new();
+    let mut result = Box::new(Vec::new());
     for it in parts.iter() {
-        if it.order_no.contains(pat) {
+        if it.order_no.to_lowercase().contains(&pat.to_lowercase()) {
             result.push(it.clone());
         }
     }
     result
 }
-fn select_unit(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
+fn select_unit(pat: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box<PartsItem>>> {
     if pat == "" {
         return parts;
     }
-    let mut result: Vec<PartsItem> = Vec::new();
-    for it in parts.iter() {
-        if it.unit_no.to_string().as_str() == pat {
-            result.push(it.clone());
+    let output = match pat.parse::<i32>() {
+        Ok(n) => {
+            let mut result = Box::new(Vec::new());
+            for it in parts.iter() {
+                if it.unit_no == n {
+                    result.push(it.clone());
+                }
+            }
+            result
         }
-    }
-    result
+        Err(_) => parts,
+    };
+    output
 }
 
-fn search_word(searchword: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
+fn search_word(searchword: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box<PartsItem>>> {
     let pat = searchword.trim();
     if pat == "" {
         return parts;
     }
-
+    // 小文字変換してオーダー番号、名前、型式、メーカ、備考、商社の中でヒットする項目を探す
     let is_pattern = |it: &PartsItem, pattern: &str| {
         if it.order_no.to_lowercase().contains(&pattern.to_lowercase())
             || it.name.to_lowercase().contains(&pattern.to_lowercase())
@@ -203,7 +207,8 @@ fn search_word(searchword: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
             false
         }
     };
-    let mut result: Vec<PartsItem> = Vec::new();
+
+    let mut result = Box::new(Vec::new());
 
     for it in parts.iter() {
         let mut is_ok = true;

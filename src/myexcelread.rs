@@ -2,15 +2,15 @@ use anyhow::Result;
 use calamine::{open_workbook, DataType, Reader, Xlsx};
 use std::path::PathBuf;
 use chrono::{NaiveDate,Duration};
-pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>> {
+pub fn readexcel(filename: &PathBuf) -> Result<Box<Vec<Vec<String>>>> {
     // let filename = ".\\AOTB01-01_加工品（テーピング).xlsx";
     // let mut excel = open_workbook_auto(filename).unwrap();
     //  一つのファイルのsheet1 を読み取り値を取得する
     let excel: Xlsx<_> = open_workbook(&filename)?;
     let sheetname = &excel.sheet_names()[0];
-    // println!("{:?}", sheetname);
-    // println!("{:?}", filename);
-    let mut content_data: Vec<Vec<String>> = Vec::new();
+    println!("{:?}", sheetname);
+    println!("{:?}", filename);
+    let mut content_data: Box<Vec<Vec<String>>> = Box::new(Vec::new());
     // for sheetname in sheetnames.iter() {
     let mut excel: Xlsx<_> = open_workbook(&filename)?;
     let range = excel.worksheet_range(sheetname.as_str());
@@ -19,7 +19,6 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>> {
             for row in rng.unwrap().rows() {
                 let mut exlinedata: Vec<String> = Vec::new();
                 for col in row.iter() {
-                    // println!("row={:?},row[0]={:?}",row,row[0]);
                     match *col {
                         DataType::Empty => (exlinedata.push("".to_string())),
                         DataType::String(ref s) => exlinedata.push(s.trim().to_string()),

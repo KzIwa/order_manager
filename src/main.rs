@@ -4,17 +4,18 @@ extern crate native_windows_gui as nwg;
 
 mod mydatabase;
 mod myexcelread;
+mod robocopy;
 
 use anyhow::Result;
 use nwd::NwgUi;
 
 use nwg::NativeUi;
 use std::env;
-
 // use chrono::{DateTime, FixedOffset, Local};
 use glob::glob;
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
+use robocopy::diffcopy;
 use std::fs;
 use std::path::Path;
 
@@ -30,6 +31,7 @@ fn main() -> Result<()> {
     guiapp();
     Ok(())
 }
+
 fn pretty_print_int(i: i32) -> String {
     // 千の桁カンマ区切りで文字列を返す
     let mut s = String::new();
@@ -46,7 +48,7 @@ fn pretty_print_int(i: i32) -> String {
     s
 }
 
-fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> PartsItem {
+fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> Box<PartsItem> {
     let getext = |x: usize| {
         if data.len() < x + 1 {
             "".to_string()
@@ -54,7 +56,7 @@ fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> PartsItem {
             data[x].to_string()
         }
     };
-    PartsItem {
+    Box::new(PartsItem {
         db_id: 0,
         order_no: match ordername.split_once("-") {
             Some(name) => name.0.to_string(),
@@ -87,25 +89,32 @@ fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> PartsItem {
             Ok(num) => num,
             _ => 0,
         },
-    }
+    })
 }
+
 fn delete_db_file(datapath: &Path) -> Result<()> {
-    fs::remove_file(datapath)?;
+    match fs::read(datapath) {
+        Ok(_) => {
+            fs::remove_file(datapath)?;
+        }
+        Err(_) => (),
+    }
+
     Ok(())
 }
+
 fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
     // エクセルファイルを検索してデータベースへ登録する
     let selectdir: String;
     delete_db_file(datapath)?;
-    if selectyear == 0 {
-        selectdir = format!("D:\\Data\\Excelbackup\\");
-    } else {
-        selectdir = format!("\\\\LS220DB3C9\\share\\発注管理\\{}\\", selectyear);
-    }
+    // selectdir = format!("\\\\LS220DB3C9\\share\\発注管理\\{}\\", selectyear);
+        selectdir = format!("C:\\Database\\excel\\{}\\", selectyear);
+
     createtable(datapath)?;
+
     let mut counter = 0;
     let currentpath = Path::new(selectdir.as_str());
-    let mut getitems: Vec<PartsItem> = Vec::new();
+    let mut getitems = Box::new(Vec::new());
     match env::set_current_dir(currentpath) {
         Ok(_) => {
             for partype in ["購入", "加工"].into_iter() {
@@ -117,17 +126,16 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
 
                     match readexcel(&excelname) {
                         Ok(datavec) => {
-                            let mut insert_items: Vec<PartsItem> = Vec::new();
+                            let mut insert_items: Box<Vec<PartsItem>> = Box::new(Vec::new());
                             for dt in datavec.iter() {
                                 let ordername = excelname.file_name().unwrap().to_str().unwrap();
 
                                 let item = excelvec_to_partsitem(ordername, dt);
 
-                                insert_items.push(item);
+                                insert_items.push(*item);
                             }
                             counter += &insert_items.len();
-                            getitems.extend(insert_items);
-                            // let instnum = insertsql(datapath, insert_items)?;
+                            getitems.extend(*insert_items);
                         }
                         _ => (),
                     }
@@ -164,18 +172,18 @@ pub struct DataViewApp {
     #[nwg_events( OnWindowClose:[DataViewApp::exit],OnInit: [DataViewApp::load_data])]
     window: nwg::Window,
 
-    #[nwg_resource(family: "Meiryo", size: 19)]
+    #[nwg_resource(family: "Meiryo", size: 20)]
     appfont: nwg::Font,
 
     // レイアウト管理
-    #[nwg_layout(parent:window,max_row:Some(14),spacing:3)]
+    #[nwg_layout(parent:window,max_row:Some(16),spacing:3)]
     mylayout: nwg::GridLayout,
 
     // 部品リスト
     #[nwg_control(item_count: 16,list_style:nwg::ListViewStyle::Detailed,
         ex_flags: nwg::ListViewExFlags::AUTO_COLUMN_SIZE | nwg::ListViewExFlags::FULL_ROW_SELECT)]
-    #[nwg_layout_item(layout: mylayout,col: 0, col_span: 5, row: 0, row_span: 13)]
-    #[nwg_events(OnListViewClick:[DataViewApp::getlistitem])]
+    #[nwg_layout_item(layout: mylayout,col: 0, col_span: 5, row: 0, row_span: 15)]
+    #[nwg_events(OnListViewClick:[DataViewApp::select_list_action])]
     data_view: nwg::ListView,
 
     // google search
@@ -192,10 +200,6 @@ pub struct DataViewApp {
     #[nwg_layout_item(layout: mylayout, col: 5, row: 2)]
     #[nwg_events()]
     year_input: nwg::TextInput,
-
-    // 購入加工の状態保持無限ループを防ぐ 状態フラグ["購入", "加工"]
-    #[nwg_control(text: "")]
-    typelabel: nwg::Label,
 
     // 注文番号
     #[nwg_control(text: "注文番号",font: Some(&data.appfont))]
@@ -237,29 +241,33 @@ pub struct DataViewApp {
 
     // クリアボタン
     #[nwg_control(text:"Clear",size:(270,40))]
-    #[nwg_layout_item(layout:mylayout,col:5,row:11)]
+    #[nwg_layout_item(layout:mylayout,col:5,row:13)]
     #[nwg_events(OnButtonClick:[DataViewApp::clear_all])]
     clear_btn: nwg::Button,
+    //型式
+    #[nwg_control(text: "型式",font: Some(&data.appfont))]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 12)]
+    model_edit: nwg::TextInput,
 
     // 合計金額
     #[nwg_control(text: "合計金額",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 12)]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 14)]
     grosslabel: nwg::Label,
     #[nwg_control(text: "----",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 13)]
+    #[nwg_layout_item(layout: mylayout, col: 5, row: 15)]
     grossprice: nwg::Label,
 
     // ステータスバー1
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 1, row: 13)]
+    #[nwg_layout_item(layout: mylayout, col: 1, row: 15)]
     statuslabel1: nwg::Label,
     // ステータスバー2
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 13)]
+    #[nwg_layout_item(layout: mylayout, col: 4, row: 15)]
     statuslabel2: nwg::Label,
     // Reloadボタン
     #[nwg_control(text:"Reload",size:(270,40))]
-    #[nwg_layout_item(layout:mylayout,col:0,row:13)]
+    #[nwg_layout_item(layout:mylayout,col:0,row:15)]
     #[nwg_events(OnButtonClick:[DataViewApp::reload_database])]
     reload_btn: nwg::Button,
 }
@@ -267,8 +275,7 @@ pub struct DataViewApp {
 impl DataViewApp {
     fn load_data(&self) {
         let dataview = &self.data_view;
-        // 状態フラグなので見えないようにしている
-        self.typelabel.set_visible(false);
+
         // リストビューの初期セッティング
         dataview.insert_column("注番");
         dataview.insert_column("枝番");
@@ -323,6 +330,7 @@ impl DataViewApp {
                 self.statuslabel1.set_text("データベースを作成中です");
                 let dpath = self.get_database_path(num);
                 let databasepath = Path::new(dpath.as_str());
+                diffcopy(&num).unwrap();
                 match read_excel_files(num, databasepath) {
                     Ok(getitems) => {
                         let statustext = format!("{}件をデータベースに登録しました", getitems);
@@ -336,31 +344,23 @@ impl DataViewApp {
     }
 
     fn konyu_data(&self) {
-        self.typelabel.set_text("購入");
         self.data_view.update_column(4, "型式");
         self.data_view.update_column(5, "メーカ");
     }
     fn kakou_data(&self) {
-        self.typelabel.set_text("加工");
         self.data_view.update_column(4, "材質");
         self.data_view.update_column(5, "処理");
     }
     fn update_view(&self) {
         let value = self.partstype.selection_string();
-        // matchの範囲外に処理を入れると無限ループ
-        // 状態フラグで無限ループ防いでいる
         match value.as_ref().map(|x| x as &str) {
             Some("購入") => {
-                if self.typelabel.text() != "購入" {
-                    self.konyu_data(); //状態ラベルを切換
-                    self.set_listdatabase()
-                }
+                self.kakou_data();
+                self.set_listdatabase()
             }
             Some("加工") => {
-                // if self.typelabel.text() != "加工" {
-                self.kakou_data(); //状態ラベルを切換
+                self.kakou_data();
                 self.set_listdatabase()
-                // }
             }
             None | Some(_) => (),
         }
@@ -378,9 +378,11 @@ impl DataViewApp {
         let dataview = &self.data_view;
         let mut grossprice = 0;
         dataview.clear();
+
         let selectyear = self.year_input.text();
         let yearnum = selectyear.parse::<i32>()?;
         let selectedtype = self.partstype.selection_string().unwrap();
+        // 年代ガード
         if (2019 <= yearnum && yearnum <= 2035) || yearnum == 0 {
             ()
         } else {
@@ -388,6 +390,7 @@ impl DataViewApp {
                 .set_text("年代は2019～2035の値を入力してください");
             return Ok(());
         }
+
         // gui から 検索キーワードを取得
         let select_order = self.order_input.text();
         let search_word = self.search_edit.text();
@@ -416,7 +419,7 @@ impl DataViewApp {
             }
             grossprice += gpartprice;
 
-            let toitem = vec![
+            let toitem = Box::new(vec![
                 items.order_no.to_string(),
                 items.unit_no.to_string(),
                 items.parts_no.to_string(),
@@ -433,10 +436,10 @@ impl DataViewApp {
                 pretty_print_int(items.price),
                 pretty_print_int(gpartprice),
                 // items.db_id.to_string(),
-            ];
+            ]);
 
             self.setlist_item(indexnum as i32, toitem);
-            let listlimit = 5000;
+            let listlimit = 3000;
             if indexnum > listlimit {
                 self.statuslabel1
                     .set_text(format!("{}件までを表示しています。", listlimit).as_str());
@@ -454,7 +457,7 @@ impl DataViewApp {
         Ok(())
     }
 
-    fn setlist_item<T: ToString>(&self, indexnum: i32, listdata: Vec<T>) {
+    fn setlist_item<T: ToString>(&self, indexnum: i32, listdata: Box<Vec<T>>) {
         // GUIの表の構成
         let dataview = &self.data_view;
         for (colnum, itemtext) in listdata.iter().enumerate() {
@@ -468,16 +471,17 @@ impl DataViewApp {
         }
     }
 
-    fn getlistitem(&self) {
+    fn select_list_action(&self) {
+        // リストを選択した際の動作を定義
         let listview = &self.data_view;
         // get row
         let selectrow = listview.selected_item();
-
         match selectrow {
             Some(row) => {
                 let items = listview.item(row, 0, 20).unwrap().text;
                 self.order_input.set_text(&items);
                 let model = listview.item(row, 4, 20).unwrap().text;
+                self.model_edit.set_text(&model);
                 let maker = listview.item(row, 5, 20).unwrap().text;
                 self.statuslabel1
                     .set_text(format!("{}: {}", maker, model).as_str());
