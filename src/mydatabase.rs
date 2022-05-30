@@ -6,7 +6,7 @@ use std::path::Path;
 #[derive(Debug, Default, Clone)]
 
 pub struct PartsItem {
-    pub db_id: i32,
+    // pub db_id: i32,
     pub order_no: String,
     pub unit_no: i32,
     pub parts_no: String,
@@ -59,7 +59,7 @@ pub fn createtable(savepath: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn insertsql(savepath: &Path, partsitem: Box<Vec<PartsItem>>) -> Result<usize, Error> {
+pub fn insertsql(savepath: &Path, partsitem: &Box<Vec<PartsItem>>) -> Result<usize, Error> {
     // Vecで受け取ったアイテムを指定されたPathのデータベースへ登録する
     let conn = Connection::open(savepath)?;
     let mut counter = 0;
@@ -84,6 +84,7 @@ pub fn insertsql(savepath: &Path, partsitem: Box<Vec<PartsItem>>) -> Result<usiz
             delivery_condition,
             price
         ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)";
+        // conn.set_prepared_statement_cache_capacity(16);
         conn.execute(
             statement,
             params![
@@ -105,7 +106,9 @@ pub fn insertsql(savepath: &Path, partsitem: Box<Vec<PartsItem>>) -> Result<usiz
                 item.price
             ],
         )?;
+        conn.flush_prepared_statement_cache();
     }
+
     // }
     Ok(counter)
 }
@@ -116,13 +119,13 @@ pub fn order_readsql(
     itemtype: &str,
     unitno: &str,
     searchword: &str,
-) -> Result<Box<Vec<Box<PartsItem>>>, Error> {
+) -> Result<Vec<Box<PartsItem>>, Error> {
     let conn = Connection::open(savepath)?;
-    let mut result: Box<Vec<Box<PartsItem>>> = Box::new(Vec::new());
+    let mut result: Vec<Box<PartsItem>> = Vec::new();
     let mut state = conn.prepare("SELECT * From partstable WHERE itemtype == ?")?;
     let partsitem_iter = state.query_map(params![itemtype], |row| {
         Ok(PartsItem {
-            db_id: row.get(0)?,
+            // db_id: row.get(0)?,
             order_no: row.get(1)?,
             unit_no: row.get(2)?,
             parts_no: row.get(3)?,
@@ -157,11 +160,11 @@ pub fn order_readsql(
     Ok(result)
 }
 
-fn select_order(pat: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box<PartsItem>>> {
+fn select_order(pat: &str, parts: Vec<Box<PartsItem>>) -> Vec<Box<PartsItem>> {
     if pat == "" {
         return parts;
     }
-    let mut result = Box::new(Vec::new());
+    let mut result = Vec::new();
     for it in parts.iter() {
         if it.order_no.to_lowercase().contains(&pat.to_lowercase()) {
             result.push(it.clone());
@@ -169,13 +172,14 @@ fn select_order(pat: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box<Parts
     }
     result
 }
-fn select_unit(pat: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box<PartsItem>>> {
+
+fn select_unit(pat: &str, parts: Vec<Box<PartsItem>>) -> Vec<Box<PartsItem>> {
     if pat == "" {
         return parts;
     }
     let output = match pat.parse::<i32>() {
         Ok(n) => {
-            let mut result = Box::new(Vec::new());
+            let mut result = Vec::new();
             for it in parts.iter() {
                 if it.unit_no == n {
                     result.push(it.clone());
@@ -188,7 +192,7 @@ fn select_unit(pat: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box<PartsI
     output
 }
 
-fn search_word(searchword: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box<PartsItem>>> {
+fn search_word(searchword: &str, parts: Vec<Box<PartsItem>>) -> Vec<Box<PartsItem>> {
     let pat = searchword.trim();
     if pat == "" {
         return parts;
@@ -208,7 +212,7 @@ fn search_word(searchword: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box
         }
     };
 
-    let mut result = Box::new(Vec::new());
+    let mut result = Vec::new();
 
     for it in parts.iter() {
         let mut is_ok = true;
@@ -225,10 +229,3 @@ fn search_word(searchword: &str, parts: Box<Vec<Box<PartsItem>>>) -> Box<Vec<Box
     }
     result
 }
-// fn string_to_time(st: &str) -> Option<DateTime<FixedOffset>> {
-//     let result = DateTime::parse_from_str(st, "%Y/%m/%d %H:%M:%S");
-//     match result {
-//         Ok(time) => Some(time),
-//         _ => None,
-//     }
-// }

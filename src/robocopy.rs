@@ -12,7 +12,7 @@ pub fn diffcopy(year:&i32) -> Result<()> {
 fn robocopy(selectdir: &str, select_localdir: &str) -> Result<()> {
     println!("start robocopy{}", select_localdir);
 
-    let result = Command::new("robocopy").args(&[selectdir,select_localdir,"*.xlsx","/S","/XO"]).output()?;
+    let result = Command::new("robocopy").args(&[selectdir,select_localdir,"*.xlsx","/S","/XO","/xf","~$*"]).output()?;
     println!("{}",result.status);
     Ok(())
 }

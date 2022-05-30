@@ -9,13 +9,13 @@ mod robocopy;
 use anyhow::Result;
 use nwd::NwgUi;
 
-use nwg::NativeUi;
-use std::env;
-// use chrono::{DateTime, FixedOffset, Local};
+use chrono::{DateTime, FixedOffset, Local};
 use glob::glob;
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
+use nwg::NativeUi;
 use robocopy::diffcopy;
+use std::env;
 use std::fs;
 use std::path::Path;
 
@@ -57,9 +57,9 @@ fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> Box<PartsItem> 
         }
     };
     Box::new(PartsItem {
-        db_id: 0,
-        order_no: match ordername.split_once("-") {
-            Some(name) => name.0.to_string(),
+        // db_id: 0,
+        order_no: match ordername.split_once("_") {
+            Some(name) => name.1.to_string(),
             None => ordername.to_string(),
         },
         unit_no: match getext(0).parse::<i32>() {
@@ -108,13 +108,13 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
     let selectdir: String;
     delete_db_file(datapath)?;
     // selectdir = format!("\\\\LS220DB3C9\\share\\発注管理\\{}\\", selectyear);
-        selectdir = format!("C:\\Database\\excel\\{}\\", selectyear);
+    selectdir = format!("C:\\Database\\excel\\{}\\", selectyear);
 
     createtable(datapath)?;
 
     let mut counter = 0;
     let currentpath = Path::new(selectdir.as_str());
-    let mut getitems = Box::new(Vec::new());
+    let mut getitems = Box::new(Vec::with_capacity(25));
     match env::set_current_dir(currentpath) {
         Ok(_) => {
             for partype in ["購入", "加工"].into_iter() {
@@ -128,11 +128,12 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
                         Ok(datavec) => {
                             let mut insert_items: Box<Vec<PartsItem>> = Box::new(Vec::new());
                             for dt in datavec.iter() {
-                                let ordername = excelname.file_name().unwrap().to_str().unwrap();
-
+                                let filename = excelname.file_name().unwrap().to_str().unwrap();
+                                let ordername = excelname.parent().unwrap().to_str().unwrap();
                                 let item = excelvec_to_partsitem(ordername, dt);
-
-                                insert_items.push(*item);
+                                if !filename.contains("~$") {
+                                    insert_items.push(*item);
+                                }
                             }
                             counter += &insert_items.len();
                             getitems.extend(*insert_items);
@@ -146,7 +147,7 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
             println!("{}", e);
         }
     };
-    insertsql(datapath, getitems)?;
+    insertsql(datapath, &getitems)?;
     Ok(counter)
 }
 
@@ -178,92 +179,91 @@ pub struct DataViewApp {
     // レイアウト管理
     #[nwg_layout(parent:window,max_row:Some(16),spacing:3)]
     mylayout: nwg::GridLayout,
-
     // 部品リスト
     #[nwg_control(item_count: 16,list_style:nwg::ListViewStyle::Detailed,
         ex_flags: nwg::ListViewExFlags::AUTO_COLUMN_SIZE | nwg::ListViewExFlags::FULL_ROW_SELECT)]
-    #[nwg_layout_item(layout: mylayout,col: 0, col_span: 5, row: 0, row_span: 15)]
+    #[nwg_layout_item(layout: mylayout,col: 0, col_span: 10, row: 0, row_span: 15)]
     #[nwg_events(OnListViewClick:[DataViewApp::select_list_action])]
     data_view: nwg::ListView,
 
     // google search
     #[nwg_control(text:"Google Search",size:(270,40))]
-    #[nwg_layout_item(layout:mylayout,col:5,row:0)]
+    #[nwg_layout_item(layout:mylayout,col: 10,row:0)]
     #[nwg_events(OnButtonClick:[DataViewApp::google_search])]
     google_btn: nwg::Button,
 
     // 年度
     #[nwg_control(text: "年代",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 1)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 1)]
     yearlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 2)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 2)]
     #[nwg_events()]
     year_input: nwg::TextInput,
 
     // 注文番号
     #[nwg_control(text: "注文番号",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 3)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 3)]
     orderlabel: nwg::Label,
 
     #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 4, row_span: 1)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 4, row_span: 1)]
     #[nwg_events()]
     order_input: nwg::TextInput,
 
     #[nwg_control(text: "枝番号",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 5)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 5)]
     unitlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 6, row_span: 1)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 6, row_span: 1)]
     #[nwg_events()]
     unit_input: nwg::TextInput,
 
     // 購入加工選択ボックス
     #[nwg_control(collection: vec!["購入", "加工"], selected_index: Some(0), font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 7)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 7)]
     #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
     partstype: nwg::ComboBox<&'static str>,
 
     // 検索語
     #[nwg_control(text: "検索語",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 8)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 8)]
     searchlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 9)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 9)]
     search_edit: nwg::TextInput,
 
     // 検索ボタン
     #[nwg_control(text:"Search",size:(270,40))]
-    #[nwg_layout_item(layout:mylayout,col:5,row:10)]
+    #[nwg_layout_item(layout:mylayout,col: 10,row:10)]
     #[nwg_events(OnButtonClick:[DataViewApp::set_listdatabase])]
     search_btn: nwg::Button,
 
     // クリアボタン
     #[nwg_control(text:"Clear",size:(270,40))]
-    #[nwg_layout_item(layout:mylayout,col:5,row:13)]
+    #[nwg_layout_item(layout:mylayout,col: 10,row:13)]
     #[nwg_events(OnButtonClick:[DataViewApp::clear_all])]
     clear_btn: nwg::Button,
     //型式
     #[nwg_control(text: "型式",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 12)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 12)]
     model_edit: nwg::TextInput,
 
     // 合計金額
     #[nwg_control(text: "合計金額",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 14)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 14)]
     grosslabel: nwg::Label,
     #[nwg_control(text: "----",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 5, row: 15)]
+    #[nwg_layout_item(layout: mylayout, col: 10, row: 15)]
     grossprice: nwg::Label,
 
     // ステータスバー1
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 1, row: 15)]
+    #[nwg_layout_item(layout: mylayout, col: 1,col_span:3, row: 15)]
     statuslabel1: nwg::Label,
     // ステータスバー2
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 4, row: 15)]
+    #[nwg_layout_item(layout: mylayout, col: 6,col_span:3, row: 15)]
     statuslabel2: nwg::Label,
     // Reloadボタン
     #[nwg_control(text:"Reload",size:(270,40))]
@@ -418,7 +418,7 @@ impl DataViewApp {
                 has_zero = true
             }
             grossprice += gpartprice;
-
+            // string_to_time(&items.delivery_date);
             let toitem = Box::new(vec![
                 items.order_no.to_string(),
                 items.unit_no.to_string(),
@@ -438,8 +438,8 @@ impl DataViewApp {
                 // items.db_id.to_string(),
             ]);
 
-            self.setlist_item(indexnum as i32, toitem);
-            let listlimit = 3000;
+            self.setlist_item(indexnum as i32, &toitem);
+            let listlimit = 2000;
             if indexnum > listlimit {
                 self.statuslabel1
                     .set_text(format!("{}件までを表示しています。", listlimit).as_str());
@@ -457,7 +457,7 @@ impl DataViewApp {
         Ok(())
     }
 
-    fn setlist_item<T: ToString>(&self, indexnum: i32, listdata: Box<Vec<T>>) {
+    fn setlist_item(&self, indexnum: i32, listdata: &Box<Vec<String>>) {
         // GUIの表の構成
         let dataview = &self.data_view;
         for (colnum, itemtext) in listdata.iter().enumerate() {
@@ -467,7 +467,7 @@ impl DataViewApp {
                 text: Some(itemtext.to_string()),
                 image: None,
             };
-            dataview.insert_item(listdata)
+            dataview.insert_item(listdata);
         }
     }
 
@@ -478,8 +478,9 @@ impl DataViewApp {
         let selectrow = listview.selected_item();
         match selectrow {
             Some(row) => {
-                let items = listview.item(row, 0, 20).unwrap().text;
-                self.order_input.set_text(&items);
+                // 選択行の注番をセット
+                // let items = listview.item(row, 0, 20).unwrap().text;
+                // self.order_input.set_text(&items);
                 let model = listview.item(row, 4, 20).unwrap().text;
                 self.model_edit.set_text(&model);
                 let maker = listview.item(row, 5, 20).unwrap().text;
@@ -511,6 +512,21 @@ impl DataViewApp {
     }
     fn exit(&self) {
         nwg::stop_thread_dispatch();
+    }
+}
+fn string_to_time(st: &str) -> Option<DateTime<FixedOffset>> {
+    let st = st.to_string() + " 00:00:00 +0000";
+    // println!("{}", st);
+    let result = DateTime::parse_from_str(&st, "%Y-%m-%d %H:%M:%S %z");
+    match result {
+        Ok(time) => {
+            // println!("ok{:?}", time);
+            Some(time)
+        }
+        Err(err) => {
+            // println!("{}", err);
+            None
+        }
     }
 }
 
