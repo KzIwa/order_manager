@@ -1,4 +1,5 @@
 // use chrono::prelude::*;
+use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{params, Connection, Error};
 use std::path::Path;
 
@@ -59,7 +60,7 @@ pub fn createtable(savepath: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn insertsql(savepath: &Path, partsitem: &Box<Vec<PartsItem>>) -> Result<usize, Error> {
+pub fn insertsql(savepath: &Path, partsitem: &Vec<PartsItem>) -> Result<usize, Error> {
     // Vecで受け取ったアイテムを指定されたPathのデータベースへ登録する
     let conn = Connection::open(savepath)?;
     let mut counter = 0;
@@ -119,9 +120,10 @@ pub fn order_readsql(
     itemtype: &str,
     unitno: &str,
     searchword: &str,
-) -> Result<Vec<Box<PartsItem>>, Error> {
+    deliverycheck: &bool, // 納期超過チェックフラグ
+) -> Result<Vec<PartsItem>, Error> {
     let conn = Connection::open(savepath)?;
-    let mut result: Vec<Box<PartsItem>> = Vec::new();
+    let mut result: Vec<PartsItem> = Vec::new();
     let mut state = conn.prepare("SELECT * From partstable WHERE itemtype == ?")?;
     let partsitem_iter = state.query_map(params![itemtype], |row| {
         Ok(PartsItem {
@@ -148,32 +150,54 @@ pub fn order_readsql(
     for item in partsitem_iter {
         match item {
             Ok(it) => {
-                let item = Box::new(it);
+                let item = it;
                 result.push(item)
             }
             _ => (),
         }
     }
-    let result = select_order(orderno.trim(), result);
+    let result = select_order(orderno.trim(), result, &deliverycheck);
     let result = select_unit(unitno.trim_end(), result);
     let result = search_word(searchword.trim(), result);
     Ok(result)
 }
 
-fn select_order(pat: &str, parts: Vec<Box<PartsItem>>) -> Vec<Box<PartsItem>> {
-    if pat == "" {
-        return parts;
-    }
+fn select_order(pat: &str, parts: Vec<PartsItem>, deliverycheck: &bool) -> Vec<PartsItem> {
     let mut result = Vec::new();
-    for it in parts.iter() {
-        if it.order_no.to_lowercase().contains(&pat.to_lowercase()) {
+    if pat == "" {
+        for it in parts.iter() {
+            // 納期超過チェック
+            if *deliverycheck && isnot_over(it) {
+                continue;
+            }
             result.push(it.clone());
+        }
+    }
+    for it in parts.iter() {
+        // 納期超過チェック
+        if *deliverycheck && isnot_over(it) {
+            continue;
+        }
+        let searchwords = pat.split_whitespace();
+        let mut iscontain = true;
+        for searchword in searchwords.into_iter() {
+            if !it
+                .order_no
+                .to_lowercase()
+                .contains(&searchword.to_lowercase())
+            {
+                iscontain = false;
+                break;
+            }
+        }
+        if iscontain {
+            result.push(it.clone())
         }
     }
     result
 }
 
-fn select_unit(pat: &str, parts: Vec<Box<PartsItem>>) -> Vec<Box<PartsItem>> {
+fn select_unit(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
     if pat == "" {
         return parts;
     }
@@ -192,11 +216,12 @@ fn select_unit(pat: &str, parts: Vec<Box<PartsItem>>) -> Vec<Box<PartsItem>> {
     output
 }
 
-fn search_word(searchword: &str, parts: Vec<Box<PartsItem>>) -> Vec<Box<PartsItem>> {
+fn search_word(searchword: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
     let pat = searchword.trim();
     if pat == "" {
         return parts;
     }
+
     // 小文字変換してオーダー番号、名前、型式、メーカ、備考、商社の中でヒットする項目を探す
     let is_pattern = |it: &PartsItem, pattern: &str| {
         if it.order_no.to_lowercase().contains(&pattern.to_lowercase())
@@ -228,4 +253,32 @@ fn search_word(searchword: &str, parts: Vec<Box<PartsItem>>) -> Vec<Box<PartsIte
         }
     }
     result
+}
+
+fn string_to_time(st: &str) -> Option<DateTime<Local>> {
+    let st = st.to_string() + " 00:00:00";
+
+    let result = Local.datetime_from_str(&st, "%Y-%m-%d %H:%M:%S");
+    match result {
+        Ok(time) => Some(time),
+        Err(_) => None,
+    }
+}
+
+fn isnot_over(item: &PartsItem) -> bool {
+    let today = Local::today();
+    if item.delivery_date == "" {
+        true;
+    }
+    let delidate = string_to_time(&item.delivery_date);
+    match delidate {
+        Some(date) => {
+            if today >= date.date() && item.delicondition == "" {
+                false
+            } else {
+                true
+            }
+        }
+        None => true,
+    }
 }

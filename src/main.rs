@@ -7,17 +7,17 @@ mod myexcelread;
 mod robocopy;
 
 use anyhow::Result;
-use nwd::NwgUi;
 
-use chrono::{DateTime, FixedOffset, Local};
+// use chrono::{DateTime, Local, TimeZone};
 use glob::glob;
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
+use nwd::NwgUi;
 use nwg::NativeUi;
 use robocopy::diffcopy;
-use std::env;
-use std::fs;
+
 use std::path::Path;
+use std::{env, fs};
 
 fn main() -> Result<()> {
     // 年毎にデータベースを作成し年で選択する
@@ -239,6 +239,11 @@ pub struct DataViewApp {
     #[nwg_events(OnButtonClick:[DataViewApp::set_listdatabase])]
     search_btn: nwg::Button,
 
+    // 納期超過チェックボックス
+    #[nwg_control(text:"納期超過チェック")]
+    #[nwg_layout_item(layout:mylayout,col: 10,row:11)]
+    delivery_check: nwg::CheckBox,
+
     // クリアボタン
     #[nwg_control(text:"Clear",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col: 10,row:13)]
@@ -306,6 +311,8 @@ impl DataViewApp {
         self.search_edit.set_text("");
         self.unit_input.set_text("");
         self.order_input.set_text("");
+        self.delivery_check
+            .set_check_state(nwg::CheckBoxState::Unchecked);
     }
     fn reload_database(&self) {
         let selectyear = self.year_input.text().trim().parse::<i32>();
@@ -355,7 +362,7 @@ impl DataViewApp {
         let value = self.partstype.selection_string();
         match value.as_ref().map(|x| x as &str) {
             Some("購入") => {
-                self.kakou_data();
+                self.konyu_data();
                 self.set_listdatabase()
             }
             Some("加工") => {
@@ -376,6 +383,7 @@ impl DataViewApp {
         self.statuslabel1.set_text("");
         self.statuslabel2.set_text("");
         let dataview = &self.data_view;
+        let deliverycheck = self.delivery_check.check_state() == nwg::CheckBoxState::Checked;
         let mut grossprice = 0;
         dataview.clear();
 
@@ -404,6 +412,7 @@ impl DataViewApp {
             &selectedtype,
             &selectunit,
             &search_word,
+            &deliverycheck
         )?;
 
         self.statuslabel1
@@ -412,6 +421,7 @@ impl DataViewApp {
 
         // guiにアイテムをセット
         for (indexnum, items) in contents.iter().enumerate() {
+
             let gpartprice = items.price * items.itemqty;
             if gpartprice == 0 && items.name.trim() != "欠番" && !items.remarks.contains("支給品")
             {
@@ -419,7 +429,7 @@ impl DataViewApp {
             }
             grossprice += gpartprice;
             // string_to_time(&items.delivery_date);
-            let toitem = Box::new(vec![
+            let toitem = vec![
                 items.order_no.to_string(),
                 items.unit_no.to_string(),
                 items.parts_no.to_string(),
@@ -436,7 +446,7 @@ impl DataViewApp {
                 pretty_print_int(items.price),
                 pretty_print_int(gpartprice),
                 // items.db_id.to_string(),
-            ]);
+            ];
 
             self.setlist_item(indexnum as i32, &toitem);
             let listlimit = 2000;
@@ -457,7 +467,7 @@ impl DataViewApp {
         Ok(())
     }
 
-    fn setlist_item(&self, indexnum: i32, listdata: &Box<Vec<String>>) {
+    fn setlist_item(&self, indexnum: i32, listdata: &Vec<String>) {
         // GUIの表の構成
         let dataview = &self.data_view;
         for (colnum, itemtext) in listdata.iter().enumerate() {
@@ -514,21 +524,22 @@ impl DataViewApp {
         nwg::stop_thread_dispatch();
     }
 }
-fn string_to_time(st: &str) -> Option<DateTime<FixedOffset>> {
-    let st = st.to_string() + " 00:00:00 +0000";
-    // println!("{}", st);
-    let result = DateTime::parse_from_str(&st, "%Y-%m-%d %H:%M:%S %z");
-    match result {
-        Ok(time) => {
-            // println!("ok{:?}", time);
-            Some(time)
-        }
-        Err(err) => {
-            // println!("{}", err);
-            None
-        }
-    }
-}
+
+// fn string_to_time(st: &str) -> Option<DateTime<Local>> {
+//     let st = st.to_string() + " 00:00:00";
+//     // println!("{}", st);
+//     let result = Local.datetime_from_str(&st, "%Y-%m-%d %H:%M:%S");
+//     match result {
+//         Ok(time) => {
+//             // println!("ok{:?}", time);
+//             Some(time)
+//         }
+//         Err(_) => {
+//             // println!("{}", err);
+//             None
+//         }
+//     }
+// }
 
 #[test]
 fn pretty_print_test() {
