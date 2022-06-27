@@ -60,38 +60,44 @@ pub fn createtable(savepath: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn insertsql(savepath: &Path, partsitem: &Vec<PartsItem>) -> Result<usize, Error> {
+pub fn insertsql(savepath: &Path, partsitem: &[PartsItem]) -> Result<usize, Error> {
     // Vecで受け取ったアイテムを指定されたPathのデータベースへ登録する
     let conn = Connection::open(savepath)?;
     let mut counter = 0;
+
+    let statement = "INSERT INTO partstable(
+        order_no,
+        unit_no,
+        parts_no,
+        rev_mark,
+        name,
+        itemtype,
+        model,
+        maker,
+        itemqty,
+        remarks,
+        condition,
+        vender,
+        order_date,
+        delivery_date,
+        delivery_condition,
+        price
+    ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)";
+
     for item in partsitem.iter() {
-        // println!("{:?}", item);
         counter += 1;
-        let statement = "INSERT INTO partstable(
-            order_no,
-            unit_no,
-            parts_no,
-            rev_mark,
-            name,
-            itemtype,
-            model,
-            maker,
-            itemqty,
-            remarks,
-            condition,
-            vender,
-            order_date,
-            delivery_date,
-            delivery_condition,
-            price
-        ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)";
-        // conn.set_prepared_statement_cache_capacity(16);
+        let partnum:Vec<&str> = item.parts_no.split("-").collect();
+        let partno = if partnum.len()>1{
+            partnum[1]
+        }else{
+            &item.parts_no
+        };
         conn.execute(
             statement,
             params![
                 item.order_no,
                 item.unit_no,
-                item.parts_no,
+                partno,
                 item.rev_mark,
                 item.name,
                 item.itemtype,
@@ -107,9 +113,8 @@ pub fn insertsql(savepath: &Path, partsitem: &Vec<PartsItem>) -> Result<usize, E
                 item.price
             ],
         )?;
-        conn.flush_prepared_statement_cache();
     }
-
+    conn.cache_flush()?;
     // }
     Ok(counter)
 }
@@ -156,50 +161,45 @@ pub fn order_readsql(
             _ => (),
         }
     }
-    let result = select_order(orderno.trim(), result, &deliverycheck);
-    let result = select_unit(unitno.trim_end(), result);
-    let result = search_word(searchword.trim(), result);
+    let result = select_order(orderno.trim(), &result, &deliverycheck);
+    let result = select_unit(unitno.trim_end(), &result);
+    let result = search_word(searchword.trim(), &result);
     Ok(result)
 }
 
-fn select_order(pat: &str, parts: Vec<PartsItem>, deliverycheck: &bool) -> Vec<PartsItem> {
+fn select_order(pat: &str, parts: &[PartsItem], deliverycheck: &bool) -> Vec<PartsItem> {
     let mut result = Vec::new();
-    if pat == "" {
-        for it in parts.iter() {
-            // 納期超過チェック
-            if *deliverycheck && isnot_over(it) {
-                continue;
-            }
-            result.push(it.clone());
-        }
-    }
     for it in parts.iter() {
         // 納期超過チェック
         if *deliverycheck && isnot_over(it) {
             continue;
         }
-        let searchwords = pat.split_whitespace();
-        let mut iscontain = true;
-        for searchword in searchwords.into_iter() {
-            if !it
-                .order_no
-                .to_lowercase()
-                .contains(&searchword.to_lowercase())
-            {
-                iscontain = false;
-                break;
+        if pat == "" {
+            result.push(it.clone());
+        } else {
+            let searchwords = pat.split_whitespace();
+            let mut iscontain = true;
+            for searchword in searchwords.into_iter() {
+                if !it
+                    .order_no
+                    .to_lowercase()
+                    .contains(&searchword.to_lowercase())
+                {
+                    iscontain = false;
+                    break;
+                }
             }
-        }
-        if iscontain {
-            result.push(it.clone())
+            if iscontain {
+                result.push(it.clone())
+            }
         }
     }
     result
 }
 
-fn select_unit(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
+fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
     if pat == "" {
-        return parts;
+        return parts.to_vec();
     }
     let output = match pat.parse::<i32>() {
         Ok(n) => {
@@ -211,15 +211,15 @@ fn select_unit(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
             }
             result
         }
-        Err(_) => parts,
+        Err(_) => parts.to_vec(),
     };
     output
 }
 
-fn search_word(searchword: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
+fn search_word(searchword: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
     let pat = searchword.trim();
     if pat == "" {
-        return parts;
+        return parts.to_vec();
     }
 
     // 小文字変換してオーダー番号、名前、型式、メーカ、備考、商社の中でヒットする項目を探す
@@ -267,13 +267,13 @@ fn string_to_time(st: &str) -> Option<DateTime<Local>> {
 
 fn isnot_over(item: &PartsItem) -> bool {
     let today = Local::today();
-    if item.delivery_date == "" {
+    if item.delivery_date.trim() == "" {
         true;
     }
-    let delidate = string_to_time(&item.delivery_date);
+    let delidate = string_to_time(&item.delivery_date.trim());
     match delidate {
         Some(date) => {
-            if today >= date.date() && item.delicondition == "" {
+            if today >= date.date() && item.delicondition.trim() == "" {
                 false
             } else {
                 true

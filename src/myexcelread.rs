@@ -8,10 +8,8 @@ pub fn readexcel(filename: &PathBuf) -> Result<Box<Vec<Vec<String>>>> {
     //  一つのファイルのsheet1 を読み取り値を取得する
     let excel: Xlsx<_> = open_workbook(&filename)?;
     let sheetname = &excel.sheet_names()[0];
-    println!("{:?}", sheetname);
-    println!("{:?}", filename);
+
     let mut content_data: Box<Vec<Vec<String>>> = Box::new(Vec::new());
-    // for sheetname in sheetnames.iter() {
     let mut excel: Xlsx<_> = open_workbook(&filename)?;
     let range = excel.worksheet_range(sheetname.as_str());
     match range {
@@ -36,7 +34,6 @@ pub fn readexcel(filename: &PathBuf) -> Result<Box<Vec<Vec<String>>>> {
                 if exlinedata.len() > 5 && exlinedata[4] != "" {
                     match exlinedata[1].as_str() {
                         "加工" | "購入" => {
-                            // println!("{:?}", exlinedata);
                             content_data.push(exlinedata);
                         }
                         _ => {}
@@ -45,7 +42,6 @@ pub fn readexcel(filename: &PathBuf) -> Result<Box<Vec<Vec<String>>>> {
             }
         }
         _ => {
-            // println!("can not open{:?}", &filename);
             content_data.push(vec!["".to_string()])
         }
     }

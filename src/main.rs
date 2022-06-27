@@ -5,17 +5,16 @@ extern crate native_windows_gui as nwg;
 mod mydatabase;
 mod myexcelread;
 mod robocopy;
+use anyhow::{Context, Result};
+use std::collections::HashMap;
+use std::io::{BufReader, Read};
 
-use anyhow::Result;
-
-// use chrono::{DateTime, Local, TimeZone};
 use glob::glob;
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
 use nwd::NwgUi;
 use nwg::NativeUi;
 use robocopy::diffcopy;
-
 use std::path::Path;
 use std::{env, fs};
 
@@ -30,6 +29,59 @@ fn main() -> Result<()> {
     }
     guiapp();
     Ok(())
+}
+//設定パラメータを保持する構造体
+struct SettingItem {
+    maxdisplay_linenumber: usize,
+    searchfolder: String,
+}
+impl SettingItem {
+    fn new() -> Result<Self> {
+        /*
+        partsetting.txtに記載にitemname@と記載後、値を書くことで新しい設定値を定義できる。
+        設定値をファイルから読み出す
+        Setting名称をキーとして設定値をHashMapに格納。タプルの0番目に数値、1番目にVec<文字列>
+        Open Setting file
+        */
+        let setting_file = "C:\\Database\\partsetting.txt";
+        let f = fs::File::open(setting_file).with_context(|| format!("failed to open file"))?;
+        let mut buffer = BufReader::new(f);
+        let mut settings = String::with_capacity(1028);
+        buffer
+            .read_to_string(&mut settings)
+            .with_context(|| format!("failed to read settings"))?;
+        // 改行文字やタブ文字など不用な文字を削除
+        for removestr in [" ", "\r\n", "\n", "\t"].iter() {
+            settings = settings.replace(removestr, "");
+        }
+        settings = settings.trim().to_string();
+        let setting_items = settings.split("---").collect::<Vec<&str>>();
+        let mut partsettings = HashMap::new();
+        for setting_info in setting_items.iter() {
+            let setting_group: Vec<&str> = setting_info.split("@").collect();
+            let mut item_value = Vec::new();
+            let mut item_str = String::new();
+            let values: Vec<&str> = setting_group[1].split(";").collect();
+            for val in values.iter().filter(|x| !x.contains("//")) {
+                // 数値と文字列で取り込み方を分岐
+                match val.parse::<usize>() {
+                    Ok(n) => item_value.push(n),
+                    Err(_) => {
+                        item_str = val.to_string();
+                    }
+                }
+            }
+            let item_name = setting_group[0].to_string();
+            partsettings.insert(item_name, (item_value, item_str));
+        }
+        // パースされた数値を取り出したいときは~.0 文字列のときは~.1
+        let maxdisplay_linenumber = partsettings["max_line"].0[0];
+        let searchfolder = (&partsettings["search_folder"].1).to_string();
+        Ok(Self {
+            maxdisplay_linenumber,
+            searchfolder,
+        })
+    }
 }
 
 fn pretty_print_int(i: i32) -> String {
@@ -48,7 +100,7 @@ fn pretty_print_int(i: i32) -> String {
     s
 }
 
-fn excelvec_to_partsitem(ordername: &str, data: &Vec<String>) -> Box<PartsItem> {
+fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> Box<PartsItem> {
     let getext = |x: usize| {
         if data.len() < x + 1 {
             "".to_string()
@@ -107,14 +159,13 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
     // エクセルファイルを検索してデータベースへ登録する
     let selectdir: String;
     delete_db_file(datapath)?;
-    // selectdir = format!("\\\\LS220DB3C9\\share\\発注管理\\{}\\", selectyear);
     selectdir = format!("C:\\Database\\excel\\{}\\", selectyear);
 
     createtable(datapath)?;
 
     let mut counter = 0;
     let currentpath = Path::new(selectdir.as_str());
-    let mut getitems = Box::new(Vec::with_capacity(25));
+    let mut getitems = Vec::new();
     match env::set_current_dir(currentpath) {
         Ok(_) => {
             for partype in ["購入", "加工"].into_iter() {
@@ -122,11 +173,10 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
                 let targetfiles = glob(&pattern).expect("cannot find excel file");
                 for itemname in targetfiles {
                     let excelname = itemname.expect("can not open excel file");
-                    // println!("{:?}", excelname);
 
                     match readexcel(&excelname) {
                         Ok(datavec) => {
-                            let mut insert_items: Box<Vec<PartsItem>> = Box::new(Vec::new());
+                            let mut insert_items: Vec<PartsItem> = Vec::new();
                             for dt in datavec.iter() {
                                 let filename = excelname.file_name().unwrap().to_str().unwrap();
                                 let ordername = excelname.parent().unwrap().to_str().unwrap();
@@ -136,7 +186,7 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
                                 }
                             }
                             counter += &insert_items.len();
-                            getitems.extend(*insert_items);
+                            getitems.extend(insert_items);
                         }
                         _ => (),
                     }
@@ -206,7 +256,7 @@ pub struct DataViewApp {
     #[nwg_layout_item(layout: mylayout, col: 10, row: 3)]
     orderlabel: nwg::Label,
 
-    #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
+    #[nwg_control(text: "",font: Some(&data.appfont),focus:false)]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 4, row_span: 1)]
     #[nwg_events()]
     order_input: nwg::TextInput,
@@ -214,7 +264,7 @@ pub struct DataViewApp {
     #[nwg_control(text: "枝番号",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 5)]
     unitlabel: nwg::Label,
-    #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
+    #[nwg_control(text: "",font: Some(&data.appfont),focus:false)]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 6, row_span: 1)]
     #[nwg_events()]
     unit_input: nwg::TextInput,
@@ -242,6 +292,7 @@ pub struct DataViewApp {
     // 納期超過チェックボックス
     #[nwg_control(text:"納期超過チェック")]
     #[nwg_layout_item(layout:mylayout,col: 10,row:11)]
+    // #[nwg_events(OnButtonClick:[DataViewApp::set_listdatabase])]
     delivery_check: nwg::CheckBox,
 
     // クリアボタン
@@ -315,6 +366,7 @@ impl DataViewApp {
             .set_check_state(nwg::CheckBoxState::Unchecked);
     }
     fn reload_database(&self) {
+        let settingitem = SettingItem::new();
         let selectyear = self.year_input.text().trim().parse::<i32>();
         // 範囲外の年代の入力に対するガードパターン
         match selectyear {
@@ -337,14 +389,25 @@ impl DataViewApp {
                 self.statuslabel1.set_text("データベースを作成中です");
                 let dpath = self.get_database_path(num);
                 let databasepath = Path::new(dpath.as_str());
-                diffcopy(&num).unwrap();
-                match read_excel_files(num, databasepath) {
-                    Ok(getitems) => {
-                        let statustext = format!("{}件をデータベースに登録しました", getitems);
-                        self.statuslabel1.set_text(&statustext);
+
+                match settingitem {
+                    Ok(st) => {
+                        let targetfolder = st.searchfolder;
+                        diffcopy(&num, &targetfolder).unwrap();
+                        match read_excel_files(num, databasepath) {
+                            Ok(getitems) => {
+                                let statustext =
+                                    format!("{}件をデータベースに登録しました", getitems);
+                                self.statuslabel1.set_text(&statustext);
+                            }
+                            Err(_) => (),
+                        };
                     }
-                    Err(_) => (),
-                };
+                    Err(_) => {
+                        self.statuslabel1
+                            .set_text("C:\\Database\\partsetting.txtが見つかりません");
+                    }
+                }
             }
             _ => (),
         }
@@ -358,6 +421,7 @@ impl DataViewApp {
         self.data_view.update_column(4, "材質");
         self.data_view.update_column(5, "処理");
     }
+    
     fn update_view(&self) {
         let value = self.partstype.selection_string();
         match value.as_ref().map(|x| x as &str) {
@@ -379,6 +443,7 @@ impl DataViewApp {
             Err(e) => self.statuslabel1.set_text(e.to_string().as_str()),
         }
     }
+
     fn read_database(&self) -> Result<()> {
         self.statuslabel1.set_text("");
         self.statuslabel2.set_text("");
@@ -412,49 +477,58 @@ impl DataViewApp {
             &selectedtype,
             &selectunit,
             &search_word,
-            &deliverycheck
+            &deliverycheck,
         )?;
 
         self.statuslabel1
             .set_text(format!("{}件の該当項目があります", contents.len()).as_str());
         let mut has_zero = false;
+        let settingitem = SettingItem::new();
+        match settingitem {
+            Ok(st) => {
+                let listlimit = st.maxdisplay_linenumber;
+                // guiにアイテムをセット
+                for (indexnum, items) in contents.iter().enumerate() {
+                    let gpartprice = items.price * items.itemqty;
+                    if gpartprice == 0
+                        && items.name.trim() != "欠番"
+                        && !items.remarks.contains("支給品")
+                    {
+                        has_zero = true
+                    }
+                    grossprice += gpartprice;
+                    // string_to_time(&items.delivery_date);
+                    let toitem = [
+                        items.order_no.to_string(),
+                        items.unit_no.to_string(),
+                        items.parts_no.to_string(),
+                        items.name.to_string(),
+                        items.model.to_string(),
+                        items.maker.to_string(),
+                        items.itemqty.to_string(),
+                        items.remarks.to_string(),
+                        items.condition.to_string(),
+                        items.vender.to_string(),
+                        items.order_date.to_string(),
+                        items.delivery_date.to_string(),
+                        items.delicondition.to_string(),
+                        pretty_print_int(items.price),
+                        pretty_print_int(gpartprice),
+                        // items.db_id.to_string(),
+                    ];
 
-        // guiにアイテムをセット
-        for (indexnum, items) in contents.iter().enumerate() {
+                    self.setlist_item(indexnum as i32, &toitem);
 
-            let gpartprice = items.price * items.itemqty;
-            if gpartprice == 0 && items.name.trim() != "欠番" && !items.remarks.contains("支給品")
-            {
-                has_zero = true
+                    if indexnum > listlimit {
+                        self.statuslabel1
+                            .set_text(format!("{}件までを表示しています。", listlimit).as_str());
+                        break;
+                    }
+                }
             }
-            grossprice += gpartprice;
-            // string_to_time(&items.delivery_date);
-            let toitem = vec![
-                items.order_no.to_string(),
-                items.unit_no.to_string(),
-                items.parts_no.to_string(),
-                items.name.to_string(),
-                items.model.to_string(),
-                items.maker.to_string(),
-                items.itemqty.to_string(),
-                items.remarks.to_string(),
-                items.condition.to_string(),
-                items.vender.to_string(),
-                items.order_date.to_string(),
-                items.delivery_date.to_string(),
-                items.delicondition.to_string(),
-                pretty_print_int(items.price),
-                pretty_print_int(gpartprice),
-                // items.db_id.to_string(),
-            ];
-
-            self.setlist_item(indexnum as i32, &toitem);
-            let listlimit = 2000;
-            if indexnum > listlimit {
-                self.statuslabel1
-                    .set_text(format!("{}件までを表示しています。", listlimit).as_str());
-                break;
-            }
+            Err(_) => self
+                .statuslabel1
+                .set_text("C:\\Database\\partsetting.txtが見つかりません"),
         }
 
         if has_zero {
@@ -467,7 +541,7 @@ impl DataViewApp {
         Ok(())
     }
 
-    fn setlist_item(&self, indexnum: i32, listdata: &Vec<String>) {
+    fn setlist_item(&self, indexnum: i32, listdata: &[String]) {
         // GUIの表の構成
         let dataview = &self.data_view;
         for (colnum, itemtext) in listdata.iter().enumerate() {
