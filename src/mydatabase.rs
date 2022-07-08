@@ -224,8 +224,7 @@ fn search_word(searchword: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
 
     // 小文字変換してオーダー番号、名前、型式、メーカ、備考、商社の中でヒットする項目を探す
     let is_pattern = |it: &PartsItem, pattern: &str| {
-        if it.order_no.to_lowercase().contains(&pattern.to_lowercase())
-            || it.name.to_lowercase().contains(&pattern.to_lowercase())
+        if it.name.to_lowercase().contains(&pattern.to_lowercase())
             || it.model.to_lowercase().contains(&pattern.to_lowercase())
             || it.maker.to_lowercase().contains(&pattern.to_lowercase())
             || it.remarks.contains(pattern)

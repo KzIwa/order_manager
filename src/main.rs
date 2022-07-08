@@ -5,18 +5,139 @@ extern crate native_windows_gui as nwg;
 mod mydatabase;
 mod myexcelread;
 mod robocopy;
-use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::io::{BufReader, Read};
 
+use anyhow::{Context, Result};
 use glob::glob;
-use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
-use myexcelread::readexcel;
 use nwd::NwgUi;
 use nwg::NativeUi;
-use robocopy::diffcopy;
+use std::collections::HashMap;
+use std::io::{BufReader, Read};
 use std::path::Path;
 use std::{env, fs};
+
+use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
+use myexcelread::readexcel;
+use robocopy::diffcopy;
+
+use std::{cell::RefCell, thread};
+
+/// The dialog UI
+#[derive(Default, NwgUi)]
+pub struct ReloadDialog {
+    data: RefCell<Option<String>>,
+    #[nwg_control(size: (300, 115), position: (650, 300), title: "Reloadする年代を入力してください", flags: "WINDOW|VISIBLE")]
+    #[nwg_events( OnWindowClose: [ReloadDialog::close] )]
+    window: nwg::Window,
+    // 年度
+    #[nwg_control(text: "年代", position: (15, 12),)]
+    year_label: nwg::Label,
+    #[nwg_control(text: "",position: (50, 10),size: (220, 22),focus:true)]
+    year_input: nwg::TextInput,
+
+    #[nwg_control(text: "Reloadしますか？", position: (15, 45),)]
+    choice_label: nwg::Label,
+
+    #[nwg_control(text: "YES", position: (10, 70), size: (130, 40))]
+    #[nwg_events( OnButtonClick: [ReloadDialog::choose(SELF, CTRL)] )]
+    choice_yes: nwg::Button,
+
+    #[nwg_control(text: "NO", position: (160, 70), size: (130, 40))]
+    #[nwg_events( OnButtonClick: [ReloadDialog::choose(SELF, CTRL)] )]
+    choice_no: nwg::Button,
+}
+
+impl ReloadDialog {
+    /// Create the dialog UI on a new thread. The dialog result will be returned by the thread handle.
+    /// To alert the main GUI that the dialog completed, this function takes a notice sender object.
+    fn popup(sender: nwg::NoticeSender, year: String) -> thread::JoinHandle<String> {
+        thread::spawn(move || {
+            // Create the UI just like in the main function
+            let app = ReloadDialog::build_ui(Default::default()).expect("Failed to build UI");
+            app.year_input.set_text(&year.clone());
+            nwg::dispatch_thread_events();
+
+            // Notice the main thread that the dialog completed
+            sender.notice();
+
+            // Return the dialog data
+            app.data.take().unwrap_or("Cancelled!".to_owned())
+        })
+    }
+
+    fn close(&self) {
+        nwg::stop_thread_dispatch();
+    }
+
+    fn choose(&self, btn: &nwg::Button) {
+        let mut data = self.data.borrow_mut();
+        if btn == &self.choice_no {
+            *data = Some("Reloadはキャンセルされました".to_string());
+        } else if btn == &self.choice_yes {
+            *data = self.reload_database();
+        }
+
+        self.window.close();
+    }
+    fn get_database_path(&self, selectyear: i32) -> String {
+        let dbfolder = "C:\\Database";
+        format!("{}\\parts{}.db3", dbfolder, selectyear)
+    }
+
+    fn reload_database(&self) -> Option<String> {
+        let settingitem = SettingItem::new();
+        let selectyear = self.year_input.text().trim().parse::<i32>();
+        // 範囲外の年代の入力に対するガードパターン
+        match selectyear {
+            Ok(n) => {
+                if 2019 <= n && n <= 2035 {
+                    ()
+                } else {
+                    return Some("年代に数値を正しく入力してください.".to_string());
+                }
+            }
+            Err(_) => return Some("年代に数値を正しく入力してください.".to_string()),
+        }
+
+        match selectyear {
+            Ok(num) => {
+                self.choice_yes.set_enabled(false);
+                self.choice_label.set_text("DataBase更新中");
+                let dpath = self.get_database_path(num);
+                let databasepath = Path::new(dpath.as_str());
+                let temppath = self.get_database_path(9999);
+                let dbtemp_path = Path::new(temppath.as_str());
+                let result = match settingitem {
+                    Ok(st) => {
+                        let targetfolder = st.searchfolder;
+                        diffcopy(&num, &targetfolder).unwrap();
+                        match read_excel_files(num, dbtemp_path) {
+                            Ok(getitems) => {
+                                let statustext =
+                                    format!("{}件をデータベースに登録しました", getitems);
+                                if getitems > 0 {
+                                    delete_db_file(databasepath)
+                                        .expect("データベースが削除できませんでした");
+                                    fs::rename(dbtemp_path, databasepath)
+                                        .expect("データベースを改名できません");
+                                } else {
+                                    delete_db_file(dbtemp_path)
+                                        .expect("データベースが削除できませんでした");
+                                    delete_db_file(databasepath)
+                                        .expect("データベースが削除できませんでした");
+                                }
+                                Some(statustext.to_string())
+                            }
+                            Err(_) => Some("".to_string()),
+                        }
+                    }
+                    Err(_) => Some("C:\\Database\\partsetting.txtが見つかりません".to_string()),
+                };
+                result
+            }
+            _ => Some("".to_string()),
+        }
+    }
+}
 
 fn main() -> Result<()> {
     // 年毎にデータベースを作成し年で選択する
@@ -155,14 +276,36 @@ fn delete_db_file(datapath: &Path) -> Result<()> {
     Ok(())
 }
 
+fn get_dbyear() -> Result<Vec<String>> {
+    let selectdir = format!("C:\\Database\\");
+    let currentpath = Path::new(selectdir.as_str());
+    let mut getnames = Vec::new();
+    match env::set_current_dir(currentpath) {
+        Ok(_) => {
+            let pattern = format!("./*.db3");
+            let dbnames = glob(&pattern)?;
+            for name in dbnames {
+                let dbname = name?.to_owned();
+                let yearname = dbname.to_string_lossy().into_owned();
+                let yearname = yearname.replace(".db3", "");
+                let yearname = yearname.replace("parts", "");
+                // let nyearname = yearname[..];
+                getnames.push(yearname);
+            }
+        }
+        Err(_) => {
+            // println!("Hi {}", e);
+        }
+    }
+    getnames.reverse();
+    Ok(getnames)
+}
+
 fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
     // エクセルファイルを検索してデータベースへ登録する
     let selectdir: String;
-    delete_db_file(datapath)?;
     selectdir = format!("C:\\Database\\excel\\{}\\", selectyear);
-
     createtable(datapath)?;
-
     let mut counter = 0;
     let currentpath = Path::new(selectdir.as_str());
     let mut getitems = Vec::new();
@@ -170,9 +313,9 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
         Ok(_) => {
             for partype in ["購入", "加工"].into_iter() {
                 let pattern = format!("./**/*{}*.xlsx", partype);
-                let targetfiles = glob(&pattern).expect("cannot find excel file");
+                let targetfiles = glob(&pattern)?;
                 for itemname in targetfiles {
-                    let excelname = itemname.expect("can not open excel file");
+                    let excelname = itemname?;
 
                     match readexcel(&excelname) {
                         Ok(datavec) => {
@@ -203,7 +346,6 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
 
 fn guiapp() {
     nwg::init().expect("Failed to init Native Windows GUI");
-    // nwg::Font::set_global_family("MS UI Gothic").expect("Failed to set default font");
     let mut defaultfont = nwg::Font::default();
     nwg::Font::builder()
         .size(14)
@@ -218,6 +360,9 @@ fn guiapp() {
 
 #[derive(Default, NwgUi)]
 pub struct DataViewApp {
+    // PopUpダイアログでやり取りするための変数
+    dialog_data: RefCell<Option<thread::JoinHandle<String>>>,
+
     // マクロを使ってwindow 構成を生成している
     #[nwg_control(size:(1500,500), position: (300, 300), title: "部品管理")]
     #[nwg_events( OnWindowClose:[DataViewApp::exit],OnInit: [DataViewApp::load_data])]
@@ -225,6 +370,11 @@ pub struct DataViewApp {
 
     #[nwg_resource(family: "Meiryo", size: 20)]
     appfont: nwg::Font,
+
+    // PopUpダイアログでイベント通知の変数
+    #[nwg_control]
+    #[nwg_events( OnNotice: [DataViewApp::read_dialog_output] )]
+    dialog_notice: nwg::Notice,
 
     // レイアウト管理
     #[nwg_layout(parent:window,max_row:Some(16),spacing:3)]
@@ -246,10 +396,14 @@ pub struct DataViewApp {
     #[nwg_control(text: "年代",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 1)]
     yearlabel: nwg::Label,
-    #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
+    // #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
+    // #[nwg_layout_item(layout: mylayout, col: 10, row: 2)]
+    // #[nwg_events()]
+    // year_input: nwg::TextInput,
+    #[nwg_control(font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 2)]
-    #[nwg_events()]
-    year_input: nwg::TextInput,
+    #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
+    year_input: nwg::ComboBox<String>,
 
     // 注文番号
     #[nwg_control(text: "注文番号",font: Some(&data.appfont))]
@@ -270,7 +424,7 @@ pub struct DataViewApp {
     unit_input: nwg::TextInput,
 
     // 購入加工選択ボックス
-    #[nwg_control(collection: vec!["購入", "加工"], selected_index: Some(0), font: Some(&data.appfont))]
+    #[nwg_control(font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 7)]
     #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
     partstype: nwg::ComboBox<&'static str>,
@@ -292,7 +446,6 @@ pub struct DataViewApp {
     // 納期超過チェックボックス
     #[nwg_control(text:"納期超過チェック")]
     #[nwg_layout_item(layout:mylayout,col: 10,row:11)]
-    // #[nwg_events(OnButtonClick:[DataViewApp::set_listdatabase])]
     delivery_check: nwg::CheckBox,
 
     // クリアボタン
@@ -324,7 +477,7 @@ pub struct DataViewApp {
     // Reloadボタン
     #[nwg_control(text:"Reload",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col:0,row:15)]
-    #[nwg_events(OnButtonClick:[DataViewApp::reload_database])]
+    #[nwg_events(OnButtonClick:[DataViewApp::open_dialog])]
     reload_btn: nwg::Button,
 }
 
@@ -350,7 +503,19 @@ impl DataViewApp {
         dataview.insert_column("金額");
         // dataview.insert_column("SQL_ID");
         dataview.set_headers_enabled(true);
-        self.konyu_data()
+        self.konyu_data();
+        self.partstype.set_collection(vec!["購入", "加工"]);
+        self.partstype.set_selection(Some(0));
+        self.set_year_select();
+        self.year_input.set_selection(Some(0));
+    }
+
+    fn set_year_select(&self) {
+        let years = get_dbyear();
+        let _ = match years {
+            Ok(ys) => self.year_input.set_collection(ys),
+            _ => self.year_input.set_collection(vec!["".to_string()]),
+        };
     }
 
     fn get_database_path(&self, selectyear: i32) -> String {
@@ -365,53 +530,6 @@ impl DataViewApp {
         self.delivery_check
             .set_check_state(nwg::CheckBoxState::Unchecked);
     }
-    fn reload_database(&self) {
-        let settingitem = SettingItem::new();
-        let selectyear = self.year_input.text().trim().parse::<i32>();
-        // 範囲外の年代の入力に対するガードパターン
-        match selectyear {
-            Ok(n) => {
-                if 2019 <= n && n <= 2035 {
-                    ()
-                } else {
-                    return self
-                        .statuslabel1
-                        .set_text("年代に数値を正しく入力してください");
-                }
-            }
-            Err(_) => self
-                .statuslabel1
-                .set_text("年代に数値を正しく入力してください"),
-        }
-
-        match selectyear {
-            Ok(num) => {
-                self.statuslabel1.set_text("データベースを作成中です");
-                let dpath = self.get_database_path(num);
-                let databasepath = Path::new(dpath.as_str());
-
-                match settingitem {
-                    Ok(st) => {
-                        let targetfolder = st.searchfolder;
-                        diffcopy(&num, &targetfolder).unwrap();
-                        match read_excel_files(num, databasepath) {
-                            Ok(getitems) => {
-                                let statustext =
-                                    format!("{}件をデータベースに登録しました", getitems);
-                                self.statuslabel1.set_text(&statustext);
-                            }
-                            Err(_) => (),
-                        };
-                    }
-                    Err(_) => {
-                        self.statuslabel1
-                            .set_text("C:\\Database\\partsetting.txtが見つかりません");
-                    }
-                }
-            }
-            _ => (),
-        }
-    }
 
     fn konyu_data(&self) {
         self.data_view.update_column(4, "型式");
@@ -421,7 +539,7 @@ impl DataViewApp {
         self.data_view.update_column(4, "材質");
         self.data_view.update_column(5, "処理");
     }
-    
+
     fn update_view(&self) {
         let value = self.partstype.selection_string();
         match value.as_ref().map(|x| x as &str) {
@@ -452,8 +570,11 @@ impl DataViewApp {
         let mut grossprice = 0;
         dataview.clear();
 
-        let selectyear = self.year_input.text();
-        let yearnum = selectyear.parse::<i32>()?;
+        let selectyear = self.year_input.selection_string();
+        let yearnum = match selectyear {
+            Some(year) => year.parse::<i32>()?,
+            None => 9999,
+        };
         let selectedtype = self.partstype.selection_string().unwrap();
         // 年代ガード
         if (2019 <= yearnum && yearnum <= 2035) || yearnum == 0 {
@@ -486,6 +607,7 @@ impl DataViewApp {
         let settingitem = SettingItem::new();
         match settingitem {
             Ok(st) => {
+                self.search_btn.set_enabled(false);
                 let listlimit = st.maxdisplay_linenumber;
                 // guiにアイテムをセット
                 for (indexnum, items) in contents.iter().enumerate() {
@@ -525,6 +647,7 @@ impl DataViewApp {
                         break;
                     }
                 }
+                self.search_btn.set_enabled(true);
             }
             Err(_) => self
                 .statuslabel1
@@ -544,15 +667,7 @@ impl DataViewApp {
     fn setlist_item(&self, indexnum: i32, listdata: &[String]) {
         // GUIの表の構成
         let dataview = &self.data_view;
-        for (colnum, itemtext) in listdata.iter().enumerate() {
-            let listdata = nwg::InsertListViewItem {
-                index: Some(indexnum),
-                column_index: colnum as i32,
-                text: Some(itemtext.to_string()),
-                image: None,
-            };
-            dataview.insert_item(listdata);
-        }
+        dataview.insert_items_row(Some(indexnum), listdata);
     }
 
     fn select_list_action(&self) {
@@ -594,26 +709,35 @@ impl DataViewApp {
                 .set_text("検索エラー:アイテムを選択してください"),
         }
     }
+
+    fn open_dialog(&self) {
+        // Disable the button to stop the user from spawning multiple dialogs
+        self.reload_btn.set_enabled(false);
+        self.statuslabel1.set_text("データベースを更新中");
+        let year = match self.year_input.selection_string() {
+            Some(s) => s,
+            None => "".to_string(),
+        };
+        *self.dialog_data.borrow_mut() =
+            Some(ReloadDialog::popup(self.dialog_notice.sender(), year));
+    }
     fn exit(&self) {
         nwg::stop_thread_dispatch();
     }
-}
 
-// fn string_to_time(st: &str) -> Option<DateTime<Local>> {
-//     let st = st.to_string() + " 00:00:00";
-//     // println!("{}", st);
-//     let result = Local.datetime_from_str(&st, "%Y-%m-%d %H:%M:%S");
-//     match result {
-//         Ok(time) => {
-//             // println!("ok{:?}", time);
-//             Some(time)
-//         }
-//         Err(_) => {
-//             // println!("{}", err);
-//             None
-//         }
-//     }
-// }
+    fn read_dialog_output(&self) {
+        self.reload_btn.set_enabled(true);
+        let data = self.dialog_data.borrow_mut().take();
+        match data {
+            Some(handle) => {
+                let dialog_result = handle.join().unwrap();
+                self.statuslabel1.set_text(&dialog_result);
+                self.set_year_select();
+            }
+            None => {}
+        }
+    }
+}
 
 #[test]
 fn pretty_print_test() {

@@ -2,8 +2,8 @@
 use anyhow::Result;
 use std::fs;
 use std::process::Command;
-pub fn diffcopy(year:&i32) -> Result<()> {
-    let target = format!("\\\\LS220DB3C9\\share\\発注管理\\{}",year);
+pub fn diffcopy(year:&i32,targetfolder:&str) -> Result<()> {
+    let target=format!("{}{}",targetfolder,year);
     let local = getfolder(&year.to_string())?;
     robocopy(&target, &local)?;
     Ok(())
