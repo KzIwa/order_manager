@@ -86,10 +86,10 @@ pub fn insertsql(savepath: &Path, partsitem: &[PartsItem]) -> Result<usize, Erro
 
     for item in partsitem.iter() {
         counter += 1;
-        let partnum:Vec<&str> = item.parts_no.split("-").collect();
-        let partno = if partnum.len()>1{
+        let partnum: Vec<&str> = item.parts_no.split("-").collect();
+        let partno = if partnum.len() > 1 {
             partnum[1]
-        }else{
+        } else {
             &item.parts_no
         };
         conn.execute(
@@ -205,7 +205,7 @@ fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
         Ok(n) => {
             let mut result = Vec::new();
             for it in parts.iter() {
-                if it.unit_no == n {
+                if it.unit_no.to_string().contains(n.to_string().as_str()) {
                     result.push(it.clone());
                 }
             }

@@ -176,14 +176,14 @@ impl SettingItem {
             settings = settings.replace(removestr, "");
         }
         settings = settings.trim().to_string();
-        let setting_items = settings.split("---").collect::<Vec<&str>>();
+        let setting_items = settings.split("---");
         let mut partsettings = HashMap::new();
-        for setting_info in setting_items.iter() {
+        for setting_info in setting_items {
             let setting_group: Vec<&str> = setting_info.split("@").collect();
             let mut item_value = Vec::new();
             let mut item_str = String::new();
-            let values: Vec<&str> = setting_group[1].split(";").collect();
-            for val in values.iter().filter(|x| !x.contains("//")) {
+            let values = setting_group[1].split(";");
+            for val in values.filter(|x| !x.contains("//")) {
                 // 数値と文字列で取り込み方を分岐
                 match val.parse::<usize>() {
                     Ok(n) => item_value.push(n),
@@ -319,17 +319,17 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
 
                     match readexcel(&excelname) {
                         Ok(datavec) => {
-                            let mut insert_items: Vec<PartsItem> = Vec::new();
+                            let mut inner_counter = 0;
                             for dt in datavec.iter() {
                                 let filename = excelname.file_name().unwrap().to_str().unwrap();
                                 let ordername = excelname.parent().unwrap().to_str().unwrap();
                                 let item = excelvec_to_partsitem(ordername, dt);
                                 if !filename.contains("~$") {
-                                    insert_items.push(*item);
+                                    getitems.push(*item);
+                                    inner_counter += 1;
                                 }
                             }
-                            counter += &insert_items.len();
-                            getitems.extend(insert_items);
+                            counter += inner_counter;
                         }
                         _ => (),
                     }
@@ -420,7 +420,7 @@ pub struct DataViewApp {
     unitlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont),focus:false)]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 6, row_span: 1)]
-    #[nwg_events()]
+    #[nwg_events(OnTextInput:[DataViewApp::update_view])]
     unit_input: nwg::TextInput,
 
     // 購入加工選択ボックス
@@ -440,7 +440,7 @@ pub struct DataViewApp {
     // 検索ボタン
     #[nwg_control(text:"Search",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col: 10,row:10)]
-    #[nwg_events(OnButtonClick:[DataViewApp::set_listdatabase])]
+    #[nwg_events(OnButtonClick:[DataViewApp::update_view])]
     search_btn: nwg::Button,
 
     // 納期超過チェックボックス
@@ -503,6 +503,9 @@ impl DataViewApp {
         dataview.insert_column("金額");
         // dataview.insert_column("SQL_ID");
         dataview.set_headers_enabled(true);
+        let mtemppath = self.get_database_path(9999);
+        let mdbtemp_path = Path::new(mtemppath.as_str());
+        delete_db_file(mdbtemp_path).expect("ok");
         self.konyu_data();
         self.partstype.set_collection(vec!["購入", "加工"]);
         self.partstype.set_selection(Some(0));
@@ -524,6 +527,7 @@ impl DataViewApp {
     }
 
     fn clear_all(&self) {
+        self.clear_btn.set_enabled(false);
         self.search_edit.set_text("");
         self.unit_input.set_text("");
         self.order_input.set_text("");
@@ -541,17 +545,21 @@ impl DataViewApp {
     }
 
     fn update_view(&self) {
-        let value = self.partstype.selection_string();
-        match value.as_ref().map(|x| x as &str) {
-            Some("購入") => {
-                self.konyu_data();
-                self.set_listdatabase()
+        if self.clear_btn.enabled() {
+            let value = self.partstype.selection_string();
+            match value.as_ref().map(|x| x as &str) {
+                Some("購入") => {
+                    self.konyu_data();
+                    self.set_listdatabase()
+                }
+                Some("加工") => {
+                    self.kakou_data();
+                    self.set_listdatabase()
+                }
+                None | Some(_) => (),
             }
-            Some("加工") => {
-                self.kakou_data();
-                self.set_listdatabase()
-            }
-            None | Some(_) => (),
+        } else {
+            self.clear_btn.set_enabled(true);
         }
     }
 
@@ -639,7 +647,9 @@ impl DataViewApp {
                         // items.db_id.to_string(),
                     ];
 
-                    self.setlist_item(indexnum as i32, &toitem);
+                    // GUIの表の構成
+                    let dataview = &self.data_view;
+                    dataview.insert_items_row(Some(indexnum as i32), &toitem);
 
                     if indexnum > listlimit {
                         self.statuslabel1
@@ -662,12 +672,6 @@ impl DataViewApp {
         // リストを選択状態にする
         dataview.select_item(0, true);
         Ok(())
-    }
-
-    fn setlist_item(&self, indexnum: i32, listdata: &[String]) {
-        // GUIの表の構成
-        let dataview = &self.data_view;
-        dataview.insert_items_row(Some(indexnum), listdata);
     }
 
     fn select_list_action(&self) {
@@ -713,7 +717,7 @@ impl DataViewApp {
     fn open_dialog(&self) {
         // Disable the button to stop the user from spawning multiple dialogs
         self.reload_btn.set_enabled(false);
-        self.statuslabel1.set_text("データベースを更新中");
+        self.statuslabel1.set_text("Reload中:検索可能");
         let year = match self.year_input.selection_string() {
             Some(s) => s,
             None => "".to_string(),
@@ -730,9 +734,11 @@ impl DataViewApp {
         let data = self.dialog_data.borrow_mut().take();
         match data {
             Some(handle) => {
+                let getyear = self.year_input.selection();
                 let dialog_result = handle.join().unwrap();
                 self.statuslabel1.set_text(&dialog_result);
                 self.set_year_select();
+                self.year_input.set_selection(getyear);
             }
             None => {}
         }

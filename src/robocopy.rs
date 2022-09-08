@@ -28,6 +28,7 @@ fn makefolder(dbfolder: &str) -> Result<()> {
     }
     Ok(())
 }
+
 fn getfolder(year: &str) -> Result<String> {
     // ""のときはデータベースのフォルダを返し、適切なyearのときはエクセルファイルのフォルダを返す
     let basefolder = "C:\\Database";
