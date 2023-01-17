@@ -1,0 +1,8 @@
+max_line@
+    //リスト表示最大行数;
+    3000
+---
+search_folder@
+    //excel fileを探索する親フォルダ";
+    \\LS220DB3C9\share\発注管理\
+

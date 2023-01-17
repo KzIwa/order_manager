@@ -2,6 +2,7 @@
 use anyhow::Result;
 use std::fs;
 use std::process::Command;
+
 pub fn diffcopy(year:&i32,targetfolder:&str) -> Result<()> {
     let target=format!("{}{}",targetfolder,year);
     let local = getfolder(&year.to_string())?;
@@ -12,7 +13,7 @@ pub fn diffcopy(year:&i32,targetfolder:&str) -> Result<()> {
 fn robocopy(selectdir: &str, select_localdir: &str) -> Result<()> {
     println!("start robocopy{}", select_localdir);
 
-    let result = Command::new("robocopy").args(&[selectdir,select_localdir,"*.xlsx","/S","/XO","/xf","~$*"]).output()?;
+    let result = Command::new("robocopy").args([selectdir,select_localdir,"*.xlsx","/S","/XO","/xf","~$*"]).output()?;
     println!("{}",result.status);
     Ok(())
 }
@@ -32,13 +33,13 @@ fn makefolder(dbfolder: &str) -> Result<()> {
 fn getfolder(year: &str) -> Result<String> {
     // ""のときはデータベースのフォルダを返し、適切なyearのときはエクセルファイルのフォルダを返す
     let basefolder = "C:\\Database";
-    let dbfolder = if year == "" {
+    let dbfolder = if year.is_empty() {
         basefolder.to_string()
     } else {
         let inyear = year.parse::<u32>();
         match inyear {
             Ok(dbyear) => {
-                if dbyear >= 2019 && dbyear <= 2035 {
+                if (2019..=2035).contains(&dbyear) {
                     let excelfolder=basefolder.to_string()+"\\excel";
                     makefolder(&excelfolder)?;
                     let folder =

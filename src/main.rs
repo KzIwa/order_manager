@@ -5,7 +5,6 @@ extern crate native_windows_gui as nwg;
 mod mydatabase;
 mod myexcelread;
 mod robocopy;
-
 use anyhow::{Context, Result};
 use glob::glob;
 use nwd::NwgUi;
@@ -14,6 +13,7 @@ use std::collections::HashMap;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use std::{env, fs};
+use webbrowser::{self, Browser};
 
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
@@ -53,7 +53,7 @@ impl ReloadDialog {
         thread::spawn(move || {
             // Create the UI just like in the main function
             let app = ReloadDialog::build_ui(Default::default()).expect("Failed to build UI");
-            app.year_input.set_text(&year.clone());
+            app.year_input.set_text(&year);
             nwg::dispatch_thread_events();
 
             // Notice the main thread that the dialog completed
@@ -89,8 +89,7 @@ impl ReloadDialog {
         // 範囲外の年代の入力に対するガードパターン
         match selectyear {
             Ok(n) => {
-                if 2019 <= n && n <= 2035 {
-                    ()
+                if (2019..=2035).contains(&n) {
                 } else {
                     return Some("年代に数値を正しく入力してください.".to_string());
                 }
@@ -106,7 +105,7 @@ impl ReloadDialog {
                 let databasepath = Path::new(dpath.as_str());
                 let temppath = self.get_database_path(9999);
                 let dbtemp_path = Path::new(temppath.as_str());
-                let result = match settingitem {
+                match settingitem {
                     Ok(st) => {
                         let targetfolder = st.searchfolder;
                         diffcopy(&num, &targetfolder).unwrap();
@@ -125,14 +124,13 @@ impl ReloadDialog {
                                     delete_db_file(databasepath)
                                         .expect("データベースが削除できませんでした");
                                 }
-                                Some(statustext.to_string())
+                                Some(statustext)
                             }
                             Err(_) => Some("".to_string()),
                         }
                     }
                     Err(_) => Some("C:\\Database\\partsetting.txtが見つかりません".to_string()),
-                };
-                result
+                }
             }
             _ => Some("".to_string()),
         }
@@ -165,12 +163,12 @@ impl SettingItem {
         Open Setting file
         */
         let setting_file = "C:\\Database\\partsetting.txt";
-        let f = fs::File::open(setting_file).with_context(|| format!("failed to open file"))?;
+        let f = fs::File::open(setting_file).with_context(|| "failed to open file".to_string())?;
         let mut buffer = BufReader::new(f);
         let mut settings = String::with_capacity(1028);
         buffer
             .read_to_string(&mut settings)
-            .with_context(|| format!("failed to read settings"))?;
+            .with_context(|| "failed to read settings".to_string())?;
         // 改行文字やタブ文字など不用な文字を削除
         for removestr in [" ", "\r\n", "\n", "\t"].iter() {
             settings = settings.replace(removestr, "");
@@ -179,10 +177,10 @@ impl SettingItem {
         let setting_items = settings.split("---");
         let mut partsettings = HashMap::new();
         for setting_info in setting_items {
-            let setting_group: Vec<&str> = setting_info.split("@").collect();
+            let setting_group: Vec<&str> = setting_info.split('@').collect();
             let mut item_value = Vec::new();
             let mut item_str = String::new();
-            let values = setting_group[1].split(";");
+            let values = setting_group[1].split(';');
             for val in values.filter(|x| !x.contains("//")) {
                 // 数値と文字列で取り込み方を分岐
                 match val.parse::<usize>() {
@@ -197,7 +195,7 @@ impl SettingItem {
         }
         // パースされた数値を取り出したいときは~.0 文字列のときは~.1
         let maxdisplay_linenumber = partsettings["max_line"].0[0];
-        let searchfolder = (&partsettings["search_folder"].1).to_string();
+        let searchfolder = (partsettings["search_folder"].1).to_string();
         Ok(Self {
             maxdisplay_linenumber,
             searchfolder,
@@ -221,7 +219,7 @@ fn pretty_print_int(i: i32) -> String {
     s
 }
 
-fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> Box<PartsItem> {
+fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> PartsItem {
     let getext = |x: usize| {
         if data.len() < x + 1 {
             "".to_string()
@@ -229,9 +227,9 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> Box<PartsItem> {
             data[x].to_string()
         }
     };
-    Box::new(PartsItem {
+    PartsItem {
         // db_id: 0,
-        order_no: match ordername.split_once("_") {
+        order_no: match ordername.split_once('_') {
             Some(name) => name.1.to_string(),
             None => ordername.to_string(),
         },
@@ -239,7 +237,7 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> Box<PartsItem> {
             Ok(num) => num,
             _ => 0,
         },
-        parts_no: match getext(2).split_once("-") {
+        parts_no: match getext(2).split_once('-') {
             Some(pno) => pno.1.to_string(),
             None => getext(2),
         },
@@ -262,49 +260,42 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> Box<PartsItem> {
             Ok(num) => num,
             _ => 0,
         },
-    })
+    }
 }
 
 fn delete_db_file(datapath: &Path) -> Result<()> {
-    match fs::read(datapath) {
-        Ok(_) => {
-            fs::remove_file(datapath)?;
-        }
-        Err(_) => (),
+    if fs::read(datapath).is_ok() {
+        fs::remove_file(datapath)?;
     }
 
     Ok(())
 }
 
 fn get_dbyear() -> Result<Vec<String>> {
-    let selectdir = format!("C:\\Database\\");
+    let selectdir = "C:\\Database\\".to_string();
     let currentpath = Path::new(selectdir.as_str());
     let mut getnames = Vec::new();
-    match env::set_current_dir(currentpath) {
-        Ok(_) => {
-            let pattern = format!("./*.db3");
-            let dbnames = glob(&pattern)?;
-            for name in dbnames {
-                let dbname = name?.to_owned();
-                let yearname = dbname.to_string_lossy().into_owned();
-                let yearname = yearname.replace(".db3", "");
-                let yearname = yearname.replace("parts", "");
-                // let nyearname = yearname[..];
-                getnames.push(yearname);
-            }
-        }
-        Err(_) => {
-            // println!("Hi {}", e);
+    if env::set_current_dir(currentpath).is_ok() {
+        let pattern = "./*.db3".to_string();
+        let dbnames = glob(&pattern)?;
+        for name in dbnames {
+            let dbname = name?.to_owned();
+            let yearname = dbname.to_string_lossy().into_owned();
+            let yearname = yearname.replace(".db3", "");
+            let yearname = yearname.replace("parts", "");
+            // let nyearname = yearname[..];
+            getnames.push(yearname);
         }
     }
+
     getnames.reverse();
     Ok(getnames)
 }
 
 fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
     // エクセルファイルを検索してデータベースへ登録する
-    let selectdir: String;
-    selectdir = format!("C:\\Database\\excel\\{}\\", selectyear);
+
+    let selectdir = format!("C:\\Database\\excel\\{}\\", selectyear);
     createtable(datapath)?;
     let mut counter = 0;
     let currentpath = Path::new(selectdir.as_str());
@@ -317,22 +308,22 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
                 for itemname in targetfiles {
                     let excelname = itemname?;
 
-                    match readexcel(&excelname) {
-                        Ok(datavec) => {
-                            let mut inner_counter = 0;
-                            for dt in datavec.iter() {
-                                let filename = excelname.file_name().unwrap().to_str().unwrap();
-                                let ordername = excelname.parent().unwrap().to_str().unwrap();
-                                let item = excelvec_to_partsitem(ordername, dt);
-                                if !filename.contains("~$") {
-                                    getitems.push(*item);
-                                    inner_counter += 1;
-                                }
+                    if let Ok(datavec) = readexcel(&excelname) {
+                        // Ok(datavec) => {
+                        let mut inner_counter = 0;
+                        for dt in datavec.iter() {
+                            let filename = excelname.file_name().unwrap().to_str().unwrap();
+                            let ordername = excelname.parent().unwrap().to_str().unwrap();
+                            let item = excelvec_to_partsitem(ordername, dt);
+                            if !filename.contains("~$") {
+                                getitems.push(item);
+                                inner_counter += 1;
                             }
-                            counter += inner_counter;
                         }
-                        _ => (),
+                        counter += inner_counter;
                     }
+                    //     _ => (),
+                    // }
                 }
             }
         }
@@ -443,10 +434,11 @@ pub struct DataViewApp {
     #[nwg_events(OnButtonClick:[DataViewApp::update_view])]
     search_btn: nwg::Button,
 
-    // 納期超過チェックボックス
-    #[nwg_control(text:"納期超過チェック")]
+    // 未手配チェックボックス
+    #[nwg_control(text:"未手配チェック")]
     #[nwg_layout_item(layout:mylayout,col: 10,row:11)]
-    delivery_check: nwg::CheckBox,
+    #[nwg_events(OnButtonClick:[DataViewApp::update_view])]
+    ordered_check: nwg::CheckBox,
 
     // クリアボタン
     #[nwg_control(text:"Clear",size:(270,40))]
@@ -454,7 +446,7 @@ pub struct DataViewApp {
     #[nwg_events(OnButtonClick:[DataViewApp::clear_all])]
     clear_btn: nwg::Button,
     //型式
-    #[nwg_control(text: "型式",font: Some(&data.appfont))]
+    #[nwg_control(text: "リストをクリック",font: Some(&data.appfont),readonly:true)]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 12)]
     model_edit: nwg::TextInput,
 
@@ -531,7 +523,7 @@ impl DataViewApp {
         self.search_edit.set_text("");
         self.unit_input.set_text("");
         self.order_input.set_text("");
-        self.delivery_check
+        self.ordered_check
             .set_check_state(nwg::CheckBoxState::Unchecked);
     }
 
@@ -574,7 +566,7 @@ impl DataViewApp {
         self.statuslabel1.set_text("");
         self.statuslabel2.set_text("");
         let dataview = &self.data_view;
-        let deliverycheck = self.delivery_check.check_state() == nwg::CheckBoxState::Checked;
+        let orderedcheck = self.ordered_check.check_state() == nwg::CheckBoxState::Checked;
         let mut grossprice = 0;
         dataview.clear();
 
@@ -585,8 +577,7 @@ impl DataViewApp {
         };
         let selectedtype = self.partstype.selection_string().unwrap();
         // 年代ガード
-        if (2019 <= yearnum && yearnum <= 2035) || yearnum == 0 {
-            ()
+        if (2019..=2035).contains(&yearnum) || yearnum == 0 {
         } else {
             self.statuslabel1
                 .set_text("年代は2019～2035の値を入力してください");
@@ -606,7 +597,7 @@ impl DataViewApp {
             &selectedtype,
             &selectunit,
             &search_word,
-            &deliverycheck,
+            &orderedcheck,
         )?;
 
         self.statuslabel1
@@ -679,20 +670,20 @@ impl DataViewApp {
         let listview = &self.data_view;
         // get row
         let selectrow = listview.selected_item();
-        match selectrow {
-            Some(row) => {
-                // 選択行の注番をセット
-                // let items = listview.item(row, 0, 20).unwrap().text;
-                // self.order_input.set_text(&items);
-                let model = listview.item(row, 4, 20).unwrap().text;
-                self.model_edit.set_text(&model);
-                let maker = listview.item(row, 5, 20).unwrap().text;
-                self.statuslabel1
-                    .set_text(format!("{}: {}", maker, model).as_str());
-                // listview.select_item(row, true);
-            }
-            None => (),
+        if let Some(row) = selectrow {
+            // Some(row) => {
+            // 選択行の注番をセット
+            // let items = listview.item(row, 0, 20).unwrap().text;
+            // self.order_input.set_text(&items);
+            let model = listview.item(row, 4, 20).unwrap().text;
+            self.model_edit.set_text(&model);
+            let maker = listview.item(row, 5, 20).unwrap().text;
+            self.statuslabel1
+                .set_text(format!("{}: {}", maker, model).as_str());
+            // listview.select_item(row, true);
         }
+        //     None => (),
+        // }
     }
 
     fn google_search(&self) {
@@ -704,9 +695,12 @@ impl DataViewApp {
                 let maker = listview.item(row, 5, 20).unwrap().text;
                 let searchword = format!("{} {}", model, maker);
                 let open_url = format!("https://www.google.com/search?q={}", searchword);
-                webbrowser::open(&open_url).unwrap();
-                self.statuslabel1
-                    .set_text(format!("{}をWEB検索", searchword).as_str());
+                match webbrowser::open_browser(Browser::Default, &open_url) {
+                    Ok(_) => self
+                        .statuslabel1
+                        .set_text(format!("{}をWEB検索", searchword).as_str()),
+                    Err(e) => self.statuslabel1.set_text(format!("{}", e).as_str()),
+                }
             }
             None => self
                 .statuslabel1
@@ -732,16 +726,16 @@ impl DataViewApp {
     fn read_dialog_output(&self) {
         self.reload_btn.set_enabled(true);
         let data = self.dialog_data.borrow_mut().take();
-        match data {
-            Some(handle) => {
-                let getyear = self.year_input.selection();
-                let dialog_result = handle.join().unwrap();
-                self.statuslabel1.set_text(&dialog_result);
-                self.set_year_select();
-                self.year_input.set_selection(getyear);
-            }
-            None => {}
+        if let Some(handle) = data {
+            // Some(handle) => {
+            let getyear = self.year_input.selection();
+            let dialog_result = handle.join().unwrap();
+            self.statuslabel1.set_text(&dialog_result);
+            self.set_year_select();
+            self.year_input.set_selection(getyear);
         }
+        //     None => {}
+        // }
     }
 }
 
