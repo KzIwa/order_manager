@@ -134,7 +134,6 @@ pub fn order_readsql(
     let conn = Connection::open(savepath)?;
     let mut result: Vec<PartsItem> = Vec::new();
 
-
     conn.execute_batch("BEGIN;")?;
 
     let mut state = conn.prepare("SELECT * From partstable WHERE itemtype == ?")?;
@@ -166,7 +165,7 @@ pub fn order_readsql(
         result.push(item)
         // }
     }
-    
+
     conn.execute_batch("COMMIT;")?;
 
     let result = select_order(orderno.trim(), &result, ordercheck);
@@ -179,7 +178,13 @@ fn select_order(pat: &str, parts: &[PartsItem], ordercheck: &bool) -> Vec<PartsI
     let mut result = Vec::new();
     for it in parts.iter() {
         // 納期超過チェック
-        if *ordercheck && it.condition.contains("済") {
+        if *ordercheck
+            && (it.condition.contains('済')
+                || it.condition.contains("在庫")
+                || it.condition.contains("キャンセル")
+                || it.name.contains("欠番")
+            )
+        {
             continue;
         }
         if pat.is_empty() {

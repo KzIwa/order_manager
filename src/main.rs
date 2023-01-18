@@ -7,17 +7,16 @@ mod myexcelread;
 mod robocopy;
 use anyhow::{Context, Result};
 use glob::glob;
+use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
+use myexcelread::readexcel;
 use nwd::NwgUi;
 use nwg::NativeUi;
+use robocopy::diffcopy;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use std::{env, fs};
 use webbrowser::{self, Browser};
-
-use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
-use myexcelread::readexcel;
-use robocopy::diffcopy;
 
 use std::{cell::RefCell, thread};
 
@@ -164,18 +163,23 @@ impl SettingItem {
         */
         let setting_file = "C:\\Database\\partsetting.txt";
         let f = fs::File::open(setting_file).with_context(|| "failed to open file".to_string())?;
+
         let mut buffer = BufReader::new(f);
         let mut settings = String::with_capacity(1028);
+
         buffer
             .read_to_string(&mut settings)
             .with_context(|| "failed to read settings".to_string())?;
         // 改行文字やタブ文字など不用な文字を削除
+
         for removestr in [" ", "\r\n", "\n", "\t"].iter() {
             settings = settings.replace(removestr, "");
         }
+
         settings = settings.trim().to_string();
         let setting_items = settings.split("---");
         let mut partsettings = HashMap::new();
+
         for setting_info in setting_items {
             let setting_group: Vec<&str> = setting_info.split('@').collect();
             let mut item_value = Vec::new();
@@ -196,6 +200,7 @@ impl SettingItem {
         // パースされた数値を取り出したいときは~.0 文字列のときは~.1
         let maxdisplay_linenumber = partsettings["max_line"].0[0];
         let searchfolder = (partsettings["search_folder"].1).to_string();
+
         Ok(Self {
             maxdisplay_linenumber,
             searchfolder,
@@ -227,6 +232,7 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> PartsItem {
             data[x].to_string()
         }
     };
+
     PartsItem {
         // db_id: 0,
         order_no: match ordername.split_once('_') {
@@ -300,26 +306,31 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
     let mut counter = 0;
     let currentpath = Path::new(selectdir.as_str());
     let mut getitems = Vec::new();
+
     match env::set_current_dir(currentpath) {
         Ok(_) => {
             for partype in ["購入", "加工"].into_iter() {
                 let pattern = format!("./**/*{}*.xlsx", partype);
                 let targetfiles = glob(&pattern)?;
+
                 for itemname in targetfiles {
                     let excelname = itemname?;
 
                     if let Ok(datavec) = readexcel(&excelname) {
                         // Ok(datavec) => {
                         let mut inner_counter = 0;
-                        for dt in datavec.iter() {
+
+                        datavec.iter().for_each(|dt| {
                             let filename = excelname.file_name().unwrap().to_str().unwrap();
                             let ordername = excelname.parent().unwrap().to_str().unwrap();
                             let item = excelvec_to_partsitem(ordername, dt);
+
                             if !filename.contains("~$") {
                                 getitems.push(item);
                                 inner_counter += 1;
                             }
-                        }
+                        });
+
                         counter += inner_counter;
                     }
                     //     _ => (),
@@ -400,10 +411,8 @@ pub struct DataViewApp {
     #[nwg_control(text: "注文番号",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 3)]
     orderlabel: nwg::Label,
-
     #[nwg_control(text: "",font: Some(&data.appfont),focus:false)]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 4, row_span: 1)]
-    #[nwg_events()]
     order_input: nwg::TextInput,
 
     #[nwg_control(text: "枝番号",font: Some(&data.appfont))]
@@ -441,7 +450,7 @@ pub struct DataViewApp {
     ordered_check: nwg::CheckBox,
 
     // クリアボタン
-    #[nwg_control(text:"Clear",size:(270,40))]
+    #[nwg_control(text:"検索/枝番Clear",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col: 10,row:13)]
     #[nwg_events(OnButtonClick:[DataViewApp::clear_all])]
     clear_btn: nwg::Button,
@@ -462,10 +471,12 @@ pub struct DataViewApp {
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 1,col_span:3, row: 15)]
     statuslabel1: nwg::Label,
+
     // ステータスバー2
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 6,col_span:3, row: 15)]
     statuslabel2: nwg::Label,
+
     // Reloadボタン
     #[nwg_control(text:"Reload",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col:0,row:15)]
@@ -493,11 +504,14 @@ impl DataViewApp {
         dataview.insert_column("入荷済み");
         dataview.insert_column("単価");
         dataview.insert_column("金額");
-        // dataview.insert_column("SQL_ID");
+
         dataview.set_headers_enabled(true);
+
         let mtemppath = self.get_database_path(9999);
         let mdbtemp_path = Path::new(mtemppath.as_str());
+
         delete_db_file(mdbtemp_path).expect("ok");
+
         self.konyu_data();
         self.partstype.set_collection(vec!["購入", "加工"]);
         self.partstype.set_selection(Some(0));
@@ -507,7 +521,8 @@ impl DataViewApp {
 
     fn set_year_select(&self) {
         let years = get_dbyear();
-        let _ = match years {
+
+        match years {
             Ok(ys) => self.year_input.set_collection(ys),
             _ => self.year_input.set_collection(vec!["".to_string()]),
         };
@@ -522,7 +537,6 @@ impl DataViewApp {
         self.clear_btn.set_enabled(false);
         self.search_edit.set_text("");
         self.unit_input.set_text("");
-        self.order_input.set_text("");
         self.ordered_check
             .set_check_state(nwg::CheckBoxState::Unchecked);
     }
@@ -531,6 +545,7 @@ impl DataViewApp {
         self.data_view.update_column(4, "型式");
         self.data_view.update_column(5, "メーカ");
     }
+
     fn kakou_data(&self) {
         self.data_view.update_column(4, "材質");
         self.data_view.update_column(5, "処理");
@@ -604,6 +619,7 @@ impl DataViewApp {
             .set_text(format!("{}件の該当項目があります", contents.len()).as_str());
         let mut has_zero = false;
         let settingitem = SettingItem::new();
+
         match settingitem {
             Ok(st) => {
                 self.search_btn.set_enabled(false);
@@ -675,7 +691,8 @@ impl DataViewApp {
             // 選択行の注番をセット
             // let items = listview.item(row, 0, 20).unwrap().text;
             // self.order_input.set_text(&items);
-            let model = listview.item(row, 4, 20).unwrap().text;
+            let linesize = 80;
+            let model = listview.item(row, 4, linesize).unwrap().text;
             self.model_edit.set_text(&model);
             let maker = listview.item(row, 5, 20).unwrap().text;
             self.statuslabel1
@@ -719,6 +736,7 @@ impl DataViewApp {
         *self.dialog_data.borrow_mut() =
             Some(ReloadDialog::popup(self.dialog_notice.sender(), year));
     }
+
     fn exit(&self) {
         nwg::stop_thread_dispatch();
     }
