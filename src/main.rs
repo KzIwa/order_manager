@@ -33,7 +33,7 @@ pub struct ReloadDialog {
     #[nwg_control(text: "",position: (50, 10),size: (220, 22),focus:true)]
     year_input: nwg::TextInput,
 
-    #[nwg_control(text: "Reloadしますか？", position: (15, 45),)]
+    #[nwg_control(text: "Reloadしますか?", position: (15, 45),)]
     choice_label: nwg::Label,
 
     #[nwg_control(text: "YES", position: (10, 70), size: (130, 40))]
@@ -79,7 +79,7 @@ impl ReloadDialog {
     }
     fn get_database_path(&self, selectyear: i32) -> String {
         let dbfolder = "C:\\Database";
-        format!("{}\\parts{}.db3", dbfolder, selectyear)
+        format!("{dbfolder}\\parts{selectyear}.db3")
     }
 
     fn reload_database(&self) -> Option<String> {
@@ -111,7 +111,7 @@ impl ReloadDialog {
                         match read_excel_files(num, dbtemp_path) {
                             Ok(getitems) => {
                                 let statustext =
-                                    format!("{}件をデータベースに登録しました", getitems);
+                                    format!("{getitems}件をデータベースに登録しました");
                                 if getitems > 0 {
                                     delete_db_file(databasepath)
                                         .expect("データベースが削除できませんでした");
@@ -301,7 +301,7 @@ fn get_dbyear() -> Result<Vec<String>> {
 fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
     // エクセルファイルを検索してデータベースへ登録する
 
-    let selectdir = format!("C:\\Database\\excel\\{}\\", selectyear);
+    let selectdir = format!("C:\\Database\\excel\\{selectyear}\\");
     createtable(datapath)?;
     let mut counter = 0;
     let currentpath = Path::new(selectdir.as_str());
@@ -310,7 +310,7 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
     match env::set_current_dir(currentpath) {
         Ok(_) => {
             for partype in ["購入", "加工"].into_iter() {
-                let pattern = format!("./**/*{}*.xlsx", partype);
+                let pattern = format!("./**/*{partype}*.xlsx");
                 let targetfiles = glob(&pattern)?;
 
                 for itemname in targetfiles {
@@ -339,7 +339,7 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
             }
         }
         Err(e) => {
-            println!("{}", e);
+            println!("{e}");
         }
     };
     insertsql(datapath, &getitems)?;
@@ -450,7 +450,7 @@ pub struct DataViewApp {
     ordered_check: nwg::CheckBox,
 
     // クリアボタン
-    #[nwg_control(text:"検索/枝番Clear",size:(270,40))]
+    #[nwg_control(text:"Clear",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col: 10,row:13)]
     #[nwg_events(OnButtonClick:[DataViewApp::clear_all])]
     clear_btn: nwg::Button,
@@ -530,11 +530,12 @@ impl DataViewApp {
 
     fn get_database_path(&self, selectyear: i32) -> String {
         let dbfolder = "C:\\Database";
-        format!("{}\\parts{}.db3", dbfolder, selectyear)
+        format!("{dbfolder}\\parts{selectyear}.db3")
     }
 
     fn clear_all(&self) {
         self.clear_btn.set_enabled(false);
+        self.order_input.set_text("");
         self.search_edit.set_text("");
         self.unit_input.set_text("");
         self.ordered_check
@@ -568,6 +569,7 @@ impl DataViewApp {
         } else {
             self.clear_btn.set_enabled(true);
         }
+        self.search_edit.set_text("");
     }
 
     fn set_listdatabase(&self) {
@@ -616,7 +618,7 @@ impl DataViewApp {
         )?;
 
         self.statuslabel1
-            .set_text(format!("{}件の該当項目があります", contents.len()).as_str());
+            .set_text(format!("{}→{}件の該当項目があります", search_word, contents.len()).as_str());
         let mut has_zero = false;
         let settingitem = SettingItem::new();
 
@@ -660,7 +662,7 @@ impl DataViewApp {
 
                     if indexnum > listlimit {
                         self.statuslabel1
-                            .set_text(format!("{}件までを表示しています。", listlimit).as_str());
+                            .set_text(format!("{listlimit}件までを表示しています。").as_str());
                         break;
                     }
                 }
@@ -696,7 +698,7 @@ impl DataViewApp {
             self.model_edit.set_text(&model);
             let maker = listview.item(row, 5, 20).unwrap().text;
             self.statuslabel1
-                .set_text(format!("{}: {}", maker, model).as_str());
+                .set_text(format!("{maker}: {model}").as_str());
             // listview.select_item(row, true);
         }
         //     None => (),
@@ -710,13 +712,13 @@ impl DataViewApp {
             Some(row) => {
                 let model = listview.item(row, 4, 30).unwrap().text;
                 let maker = listview.item(row, 5, 20).unwrap().text;
-                let searchword = format!("{} {}", model, maker);
-                let open_url = format!("https://www.google.com/search?q={}", searchword);
+                let searchword = format!("{model} {maker}");
+                let open_url = format!("https://www.google.com/search?q={searchword}");
                 match webbrowser::open_browser(Browser::Default, &open_url) {
                     Ok(_) => self
                         .statuslabel1
-                        .set_text(format!("{}をWEB検索", searchword).as_str()),
-                    Err(e) => self.statuslabel1.set_text(format!("{}", e).as_str()),
+                        .set_text(format!("{searchword}をWEB検索").as_str()),
+                    Err(e) => self.statuslabel1.set_text(format!("{e}").as_str()),
                 }
             }
             None => self

@@ -51,10 +51,10 @@ pub fn createtable(savepath: &Path) -> Result<(), Error> {
         [],
     ) {
         Ok(num) => {
-            println!("Database created {}", num)
+            println!("Database created {num}")
         }
         Err(error) => {
-            println!("create error {}", error)
+            println!("create error {error}")
         }
     }
     Ok(())
@@ -182,8 +182,7 @@ fn select_order(pat: &str, parts: &[PartsItem], ordercheck: &bool) -> Vec<PartsI
             && (it.condition.contains('済')
                 || it.condition.contains("在庫")
                 || it.condition.contains("キャンセル")
-                || it.name.contains("欠番")
-            )
+                || it.name.contains("欠番"))
         {
             continue;
         }
@@ -220,7 +219,7 @@ fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
             let mut result = Vec::new();
             for it in parts.iter() {
                 // if it.unit_no.to_string().contains(n.to_string().as_str()) {
-                if &it.unit_no == &n {
+                if it.unit_no == n {
                     result.push(it.to_owned());
                 }
             }

@@ -1,26 +1,35 @@
-
 use anyhow::Result;
 use std::fs;
 use std::process::Command;
 
-pub fn diffcopy(year:&i32,targetfolder:&str) -> Result<()> {
-    let target=format!("{}{}",targetfolder,year);
+pub fn diffcopy(year: &i32, targetfolder: &str) -> Result<()> {
+    let target = format!("{targetfolder}{year}");
     let local = getfolder(&year.to_string())?;
     robocopy(&target, &local)?;
     Ok(())
 }
 
 fn robocopy(selectdir: &str, select_localdir: &str) -> Result<()> {
-    println!("start robocopy{}", select_localdir);
+    println!("start robocopy{select_localdir}");
 
-    let result = Command::new("robocopy").args([selectdir,select_localdir,"*.xlsx","/S","/XO","/xf","~$*"]).output()?;
-    println!("{}",result.status);
+    let result = Command::new("robocopy")
+        .args([
+            selectdir,
+            select_localdir,
+            "*.xlsx",
+            "/S",
+            "/XO",
+            "/xf",
+            "~$*",
+        ])
+        .output()?;
+    println!("{}", result.status);
     Ok(())
 }
 
 fn makefolder(dbfolder: &str) -> Result<()> {
     // 年毎にデータベースを作成し年で選択する
-    println!("{}",dbfolder);
+    println!("{dbfolder}");
     match fs::read_dir(dbfolder) {
         Ok(_) => {}
         Err(_) => {
@@ -40,10 +49,10 @@ fn getfolder(year: &str) -> Result<String> {
         match inyear {
             Ok(dbyear) => {
                 if (2019..=2035).contains(&dbyear) {
-                    let excelfolder=basefolder.to_string()+"\\excel";
+                    let excelfolder = basefolder.to_string() + "\\excel";
                     makefolder(&excelfolder)?;
                     let folder =
-                        basefolder.to_string() + "\\excel\\" + format!("{}", dbyear).as_str();
+                        basefolder.to_string() + "\\excel\\" + format!("{dbyear}").as_str();
                     folder
                 } else {
                     basefolder.to_string()
