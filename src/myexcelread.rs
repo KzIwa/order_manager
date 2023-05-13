@@ -52,6 +52,8 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>> {
 }
 
 fn from_days_since_1900(days_since_1900: i64) -> NaiveDate {
+
     let d1900 = NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+    
     d1900 + Duration::days(days_since_1900 - 2)
 }

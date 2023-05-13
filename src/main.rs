@@ -185,6 +185,7 @@ impl SettingItem {
             let mut item_value = Vec::new();
             let mut item_str = String::new();
             let values = setting_group[1].split(';');
+
             for val in values.filter(|x| !x.contains("//")) {
                 // 数値と文字列で取り込み方を分岐
                 match val.parse::<usize>() {
@@ -194,6 +195,7 @@ impl SettingItem {
                     }
                 }
             }
+
             let item_name = setting_group[0].to_string();
             partsettings.insert(item_name, (item_value, item_str));
         }
@@ -212,7 +214,6 @@ fn pretty_print_int(i: i32) -> String {
     // 千の桁カンマ区切りで文字列を返す
     let mut s = String::new();
     let i_str = i.to_string();
-
     let a = i_str.chars().rev().enumerate();
 
     for (idx, val) in a {
@@ -333,8 +334,6 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
 
                         counter += inner_counter;
                     }
-                    //     _ => (),
-                    // }
                 }
             }
         }
@@ -569,7 +568,7 @@ impl DataViewApp {
         } else {
             self.clear_btn.set_enabled(true);
         }
-        self.search_edit.set_text("");
+        // self.search_edit.set_text("");
     }
 
     fn set_listdatabase(&self) {
@@ -590,9 +589,15 @@ impl DataViewApp {
         let selectyear = self.year_input.selection_string();
         let yearnum = match selectyear {
             Some(year) => year.parse::<i32>()?,
-            None => 9999,
+            None => 0,
         };
-        let selectedtype = self.partstype.selection_string().unwrap();
+
+        let selectedtype = if self.partstype.selection_string().is_some() {
+            self.partstype.selection_string().unwrap()
+        } else {
+            panic!("selected type Err");
+        };
+
         // 年代ガード
         if (2019..=2035).contains(&yearnum) || yearnum == 0 {
         } else {
@@ -745,17 +750,14 @@ impl DataViewApp {
 
     fn read_dialog_output(&self) {
         self.reload_btn.set_enabled(true);
-        let data = self.dialog_data.borrow_mut().take();
+        let data: Option<thread::JoinHandle<String>> = self.dialog_data.borrow_mut().take();
         if let Some(handle) = data {
-            // Some(handle) => {
             let getyear = self.year_input.selection();
             let dialog_result = handle.join().unwrap();
             self.statuslabel1.set_text(&dialog_result);
             self.set_year_select();
             self.year_input.set_selection(getyear);
         }
-        //     None => {}
-        // }
     }
 }
 

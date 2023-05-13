@@ -176,17 +176,15 @@ pub fn order_readsql(
 
 fn select_order(pat: &str, parts: &[PartsItem], ordercheck: &bool) -> Vec<PartsItem> {
     let mut result = Vec::new();
-    for it in parts.iter() {
+    parts.iter().for_each(|it| {
         // 納期超過チェック
-        if *ordercheck
+        if ordercheck.to_owned()
             && (it.condition.contains('済')
                 || it.condition.contains("在庫")
                 || it.condition.contains("キャンセル")
                 || it.name.contains("欠番"))
         {
-            continue;
-        }
-        if pat.is_empty() {
+        } else if pat.is_empty() {
             result.push(it.to_owned());
         } else {
             let searchwords = pat.split_whitespace();
@@ -201,11 +199,12 @@ fn select_order(pat: &str, parts: &[PartsItem], ordercheck: &bool) -> Vec<PartsI
                     break;
                 }
             }
+
             if iscontain {
                 result.push(it.to_owned())
             }
         }
-    }
+    });
     result
 }
 
@@ -217,12 +216,12 @@ fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
     match pat.parse::<i32>() {
         Ok(n) => {
             let mut result = Vec::new();
-            for it in parts.iter() {
+            parts.iter().for_each(|it| {
                 // if it.unit_no.to_string().contains(n.to_string().as_str()) {
                 if it.unit_no == n {
                     result.push(it.to_owned());
                 }
-            }
+            });
             result
         }
         Err(_) => parts.to_vec(),
@@ -231,7 +230,7 @@ fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
 }
 
 fn search_word(searchword: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
-    let pat = searchword.trim();
+    let pat = searchword.trim().to_string();
     if pat.is_empty() {
         return parts.to_vec();
     }
@@ -245,21 +244,22 @@ fn search_word(searchword: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
             || it.vender.contains(pattern)
     };
 
-    let mut result = Vec::new();
+    let mut result: Vec<PartsItem> = Vec::new();
+    let patterns: Vec<&str> = pat.split_whitespace().collect();
 
-    for it in parts.iter() {
+    parts.iter().for_each(|it| {
         let mut is_ok = true;
-        let patterns = pat.split_whitespace();
-        for pattern in patterns {
+
+        patterns.iter().for_each(|pattern| {
             if is_pattern(it, pattern) {
             } else {
                 is_ok = false;
             }
-        }
+        });
         if is_ok {
             result.push(it.to_owned());
         }
-    }
+    });
     result
 }
 
