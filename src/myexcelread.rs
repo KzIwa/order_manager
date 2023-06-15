@@ -1,10 +1,10 @@
-use anyhow::Result;
+
 use calamine::{open_workbook, DataType, Reader, Xlsx};
 use chrono::{Duration, NaiveDate};
 use std::path::PathBuf;
 
 
-pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>> {
+pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>, Box<dyn std::error::Error>> {
     // let filename = ".\\AOTB01-01_加工品（テーピング).xlsx";
     // let mut excel = open_workbook_auto(filename).unwrap();
     //  一つのファイルのsheet1 を読み取り値を取得する
@@ -16,9 +16,9 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>> {
     let range = excel.worksheet_range(sheetname.as_str());
     match range {
         Some(rng) => {
-            for row in rng.unwrap().rows() {
+            rng?.rows().for_each(|row| {
                 let mut exlinedata: Vec<String> = Vec::new();
-                for col in row.iter() {
+                row.iter().for_each(|col| {
                     match *col {
                         DataType::Empty => exlinedata.push("".to_string()),
                         DataType::String(ref s) => exlinedata.push(s.trim().to_string()),
@@ -31,7 +31,7 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>> {
                         }
                         _ => (),
                     }
-                }
+                });
                 // 出力例
                 // 90:購入:AOB202-90-102:セットカラー:PSCS20-10:ミスミ:1:手配済:ミスミ:760:760:
                 if exlinedata.len() > 5 && !exlinedata[4].is_empty() {
@@ -42,7 +42,7 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>> {
                         _ => {}
                     }
                 }
-            }
+            });
         }
         _ => content_data.push(vec!["".to_string()]),
     }

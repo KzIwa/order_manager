@@ -5,7 +5,7 @@ extern crate native_windows_gui as nwg;
 mod mydatabase;
 mod myexcelread;
 mod robocopy;
-use anyhow::{Context, Result};
+
 use glob::glob;
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
@@ -136,7 +136,7 @@ impl ReloadDialog {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 年毎にデータベースを作成し年で選択する
     let dbfolder = "C:\\Database";
     match fs::read_dir(dbfolder) {
@@ -154,7 +154,7 @@ struct SettingItem {
     searchfolder: String,
 }
 impl SettingItem {
-    fn new() -> Result<Self> {
+    fn new() -> Result<Self, Box<dyn std::error::Error>> {
         /*
         partsetting.txtに記載にitemname@と記載後、値を書くことで新しい設定値を定義できる。
         設定値をファイルから読み出す
@@ -162,14 +162,12 @@ impl SettingItem {
         Open Setting file
         */
         let setting_file = "C:\\Database\\partsetting.txt";
-        let f = fs::File::open(setting_file).with_context(|| "failed to open file".to_string())?;
+        let f = fs::File::open(setting_file)?;
 
         let mut buffer = BufReader::new(f);
         let mut settings = String::with_capacity(1028);
 
-        buffer
-            .read_to_string(&mut settings)
-            .with_context(|| "failed to read settings".to_string())?;
+        buffer.read_to_string(&mut settings)?;
         // 改行文字やタブ文字など不用な文字を削除
 
         for removestr in [" ", "\r\n", "\n", "\t"].iter() {
@@ -253,7 +251,7 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> PartsItem {
         itemtype: getext(1),
         model: getext(5),
         maker: getext(6),
-        itemqty: match getext(7).parse::<i32>() {
+        itemqty: match getext(7).replace('計', "").parse::<i32>() {
             Ok(num) => num,
             _ => 0,
         },
@@ -270,7 +268,7 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> PartsItem {
     }
 }
 
-fn delete_db_file(datapath: &Path) -> Result<()> {
+fn delete_db_file(datapath: &Path) -> Result<(), Box<dyn std::error::Error>> {
     if fs::read(datapath).is_ok() {
         fs::remove_file(datapath)?;
     }
@@ -278,7 +276,7 @@ fn delete_db_file(datapath: &Path) -> Result<()> {
     Ok(())
 }
 
-fn get_dbyear() -> Result<Vec<String>> {
+fn get_dbyear() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let selectdir = "C:\\Database\\".to_string();
     let currentpath = Path::new(selectdir.as_str());
     let mut getnames = Vec::new();
@@ -299,7 +297,7 @@ fn get_dbyear() -> Result<Vec<String>> {
     Ok(getnames)
 }
 
-fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize> {
+fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize, Box<dyn std::error::Error>> {
     // エクセルファイルを検索してデータベースへ登録する
 
     let selectdir = format!("C:\\Database\\excel\\{selectyear}\\");
@@ -578,7 +576,7 @@ impl DataViewApp {
         }
     }
 
-    fn read_database(&self) -> Result<()> {
+    fn read_database(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.statuslabel1.set_text("");
         self.statuslabel2.set_text("");
         let dataview = &self.data_view;
@@ -639,7 +637,8 @@ impl DataViewApp {
                         && !items.remarks.contains("支給品")
                     {
                         has_zero = true
-                    }
+                    };
+
                     grossprice += gpartprice;
                     // string_to_time(&items.delivery_date);
                     let toitem = [

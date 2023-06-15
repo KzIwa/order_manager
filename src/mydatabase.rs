@@ -132,7 +132,7 @@ pub fn order_readsql(
     ordercheck: &bool, // 納期超過チェックフラグ
 ) -> Result<Vec<PartsItem>, Error> {
     let conn = Connection::open(savepath)?;
-    let mut result: Vec<PartsItem> = Vec::new();
+    // let mut result: Vec<PartsItem> = Vec::new();
 
     conn.execute_batch("BEGIN;")?;
 
@@ -159,24 +159,35 @@ pub fn order_readsql(
         })
     })?;
 
-    for item in partsitem_iter.flatten() {
-        // if let Ok(it) = item {
-        //     let item = it;
-        result.push(item)
-        // }
-    }
+    let partsitem_iter = partsitem_iter.flatten();
+
+    // for item in partsitem_iter.flatten() {
+    //     // if let Ok(it) = item {
+    //     //     let item = it;
+    //     result.push(item)
+    //     // }
+    // }
 
     conn.execute_batch("COMMIT;")?;
 
-    let result = select_order(orderno.trim(), &result, ordercheck);
-    let result = select_unit(unitno.trim_end(), &result);
-    let result = search_word(searchword.trim(), &result);
+    let result = search_word(
+        searchword.trim(),
+        &select_unit(
+            unitno.trim_end(),
+            &select_order(orderno.trim(), partsitem_iter, ordercheck),
+        ),
+    );
+
     Ok(result)
 }
 
-fn select_order(pat: &str, parts: &[PartsItem], ordercheck: &bool) -> Vec<PartsItem> {
+fn select_order(
+    pat: &str,
+    parts: impl Iterator<Item = PartsItem>,
+    ordercheck: &bool,
+) -> Vec<PartsItem> {
     let mut result = Vec::new();
-    parts.iter().for_each(|it| {
+    parts.for_each(|it| {
         // 納期超過チェック
         if ordercheck.to_owned()
             && (it.condition.contains('済')
@@ -185,7 +196,7 @@ fn select_order(pat: &str, parts: &[PartsItem], ordercheck: &bool) -> Vec<PartsI
                 || it.name.contains("欠番"))
         {
         } else if pat.is_empty() {
-            result.push(it.to_owned());
+            result.push(it);
         } else {
             let searchwords = pat.split_whitespace();
             let mut iscontain = true;
@@ -201,7 +212,7 @@ fn select_order(pat: &str, parts: &[PartsItem], ordercheck: &bool) -> Vec<PartsI
             }
 
             if iscontain {
-                result.push(it.to_owned())
+                result.push(it)
             }
         }
     });
@@ -217,7 +228,6 @@ fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
         Ok(n) => {
             let mut result = Vec::new();
             parts.iter().for_each(|it| {
-                // if it.unit_no.to_string().contains(n.to_string().as_str()) {
                 if it.unit_no == n {
                     result.push(it.to_owned());
                 }

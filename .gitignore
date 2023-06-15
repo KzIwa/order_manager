@@ -1,1 +1,4 @@
 /target
+*.URL
+*.db3
+*.xlsx
