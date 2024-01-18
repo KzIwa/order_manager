@@ -20,6 +20,7 @@ fn robocopy(selectdir: &str, select_localdir: &str) -> Result<(), Box<dyn std::e
             select_localdir,
             "*.xlsx",
             "/S",
+            "/PURGE",
             "/XO",
             "/xf",
             "~$*",

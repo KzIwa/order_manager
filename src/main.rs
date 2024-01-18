@@ -214,16 +214,17 @@ fn pretty_print_int(i: i32) -> String {
     let i_str = i.to_string();
     let a = i_str.chars().rev().enumerate();
 
-    for (idx, val) in a {
+    a.for_each(|(idx, val)| {
         if idx != 0 && idx % 3 == 0 {
             s.insert(0, ',');
         }
         s.insert(0, val);
-    }
+    });
     s
 }
 
-fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> PartsItem {
+fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> PartsItem {
+    // エクセルから読み取ったデータをPartsItem構造体に変換
     let getext = |x: usize| {
         if data.len() < x + 1 {
             "".to_string()
@@ -231,12 +232,21 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String]) -> PartsItem {
             data[x].to_string()
         }
     };
+    let ordernamesub=match namesub.split_once("."){
+        Some(sn) =>sn.0,
+        None=>namesub
+    };
 
     PartsItem {
         // db_id: 0,
         order_no: match ordername.split_once('_') {
-            Some(name) => name.1.to_string(),
-            None => ordername.to_string(),
+            Some(name) => {
+                match name.1.split_once('_'){
+                    Some(n)=>ordernamesub.to_string() + n.1,
+                    None =>ordernamesub.to_string() + name.1,
+                }},
+            // Some(name)=>ordername.to_string(),
+            None => ordernamesub.to_string() + ordername,
         },
         unit_no: match getext(0).parse::<i32>() {
             Ok(num) => num,
@@ -311,18 +321,18 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize, Box<dyn s
             for partype in ["購入", "加工"].into_iter() {
                 let pattern = format!("./**/*{partype}*.xlsx");
                 let targetfiles = glob(&pattern)?;
-
                 for itemname in targetfiles {
+                    // エクセルファイルのファイルパス
                     let excelname = itemname?;
 
                     if let Ok(datavec) = readexcel(&excelname) {
-                        // Ok(datavec) => {
                         let mut inner_counter = 0;
 
                         datavec.iter().for_each(|dt| {
                             let filename = excelname.file_name().unwrap().to_str().unwrap();
                             let ordername = excelname.parent().unwrap().to_str().unwrap();
-                            let item = excelvec_to_partsitem(ordername, dt);
+                            // let item = excelvec_to_partsitem(ordername, dt);
+                            let item = excelvec_to_partsitem(ordername, dt,filename);
 
                             if !filename.contains("~$") {
                                 getitems.push(item);
@@ -432,6 +442,7 @@ pub struct DataViewApp {
     searchlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 9)]
+    // #[nwg_events(OnTextInput::[DataViewApp::update_view])]
     search_edit: nwg::TextInput,
 
     // 検索ボタン
@@ -580,7 +591,9 @@ impl DataViewApp {
         self.statuslabel1.set_text("");
         self.statuslabel2.set_text("");
         let dataview = &self.data_view;
+        // 未手配チェック
         let orderedcheck = self.ordered_check.check_state() == nwg::CheckBoxState::Checked;
+        // 合計金額
         let mut grossprice = 0;
         dataview.clear();
 
@@ -703,10 +716,7 @@ impl DataViewApp {
             let maker = listview.item(row, 5, 20).unwrap().text;
             self.statuslabel1
                 .set_text(format!("{maker}: {model}").as_str());
-            // listview.select_item(row, true);
         }
-        //     None => (),
-        // }
     }
 
     fn google_search(&self) {
