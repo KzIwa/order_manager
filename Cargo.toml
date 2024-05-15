@@ -1,18 +1,18 @@
 [package]
 name = "order_manager"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-native-windows-gui="1.0.13"
-native-windows-derive="1.0.5"
-rusqlite={version="0.30.0",features=["bundled"]}
-calamine="0.23.1"
-glob="0.3.1"
+native-windows-gui = "1.0.13"
+native-windows-derive = "1.0.5"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+calamine = "0.24.0"
+glob = "0.3.1"
 # chronoのバージョンアップは注意。不可逆的なダメージを負ったことがある
-chrono="0.4.26" 
+chrono = "0.4.26"
 
 # webbrowser 0.8.0　~ 0.8.4系ではクラッシュが発生している
-webbrowser="0.8.12"
+webbrowser = "1.0.1"

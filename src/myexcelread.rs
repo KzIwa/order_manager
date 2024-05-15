@@ -1,4 +1,4 @@
-use calamine::{open_workbook, DataType, Reader, Xlsx};
+use calamine::{open_workbook, Data, Reader, Xlsx};
 use chrono::{Duration, NaiveDate};
 // use std::{path::PathBuf, str::FromStr};
 use std::path::PathBuf;
@@ -9,44 +9,61 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>, Box<dyn std::er
     //  一つのファイルのsheet1 を読み取り値を取得する
     let excel: Xlsx<_> = open_workbook(filename)?;
     let sheetname = &excel.sheet_names()[0];
-    let mut content_data= Vec::new();
+    let mut content_data = Vec::new();
     let mut excel: Xlsx<_> = open_workbook(filename)?;
     let range = excel.worksheet_range(sheetname.as_str());
 
     match range {
         Ok(rng) => {
             rng.rows().for_each(|row| {
-                let mut exlinedata: Vec<String> = Vec::new();
-                row.iter().for_each(|col| {
-                    match *col {
-                        DataType::Empty => exlinedata.push("".to_string()),//空の場合
-                        DataType::String(ref s) => exlinedata.push(s.trim().to_string()),//文字列の場合
-                        DataType::Float(ref f) => exlinedata.push(f.to_string()),//浮動小数型の場合
-                        DataType::Int(ref i) => exlinedata.push(i.to_string()),//整数型の場合
-                        DataType::DateTime(ref d) => {
-                            // f64のｄの値を日付データに変換
-                            let datetime = from_days_since_1900(*d as i64);
-                            exlinedata.push(datetime.to_string())
-                        }
-                        _ => (),
-                    }
-                });
+                // let mut exlinedata: Vec<String> = Vec::new();
+                // for col in row.iter() {
+                //     if let Some(cellitem) = parse_celldata(col) {
+                //         exlinedata.push(cellitem);
+                //     }
+                // }
+                let mut exlinedata: Vec<_> =
+                    row.iter().filter_map(|col| parse_celldata(col)).collect();
                 // 出力例
                 // 90:購入:AOB202-90-102:セットカラー:PSCS20-10:ミスミ:1:手配済:ミスミ:760:760:
                 // 読み取ったデータ配列長さが5よりも大きく,材質および型式の欄が空でない場合
                 if exlinedata.len() > 5 && !exlinedata[4].is_empty() {
-                    match exlinedata[1].as_str() {
+                    match exlinedata[1].trim() {
                         "加工" | "購入" => {
-                            content_data.push(exlinedata);
+                            if &exlinedata[0] == "" {
+                                if let Some(unit_no) = rng.get_value((3, 2)) {
+                                    if let Some(unit_no) = parse_celldata(unit_no) {
+                                        exlinedata[0] = unit_no;
+                                    }
+                                };
+                            };
+                            if !content_data.contains(&exlinedata) {
+                                content_data.push(exlinedata);
+                            }
                         }
                         _ => {}
                     }
                 }
             });
         }
-        _ => content_data.push(vec!["".to_string()]),
+        Err(_) => content_data.push(vec!["".to_string()]),
     }
     Ok(content_data)
+}
+
+fn parse_celldata(dataitem: &Data) -> Option<String> {
+    match *dataitem {
+        Data::Empty => Some("".to_string()),               //空の場合
+        Data::String(ref s) => Some(s.trim().to_string()), //文字列の場合
+        Data::Float(ref f) => Some(f.to_string()),         //浮動小数型の場合
+        Data::Int(ref i) => Some(i.to_string()),           //整数型の場合
+        Data::DateTime(ref d) => {
+            // f64のｄの値を日付データに変換
+            let datetime = from_days_since_1900(d.as_f64() as i64);
+            Some(datetime.to_string())
+        }
+        _ => None,
+    }
 }
 
 fn from_days_since_1900(days_since_1900: i64) -> NaiveDate {
@@ -55,14 +72,14 @@ fn from_days_since_1900(days_since_1900: i64) -> NaiveDate {
 }
 
 #[test]
-fn readtest()->Result<(),Box<dyn std::error::Error>> {
-    use std::str::FromStr; 
-    let testpath = PathBuf::from_str("SOD301-20ロボット部購入品.xlsx").unwrap();
-    match readexcel(&testpath){
-        Ok(st)=>{
-            println!("{:?}",st);
-        },
-        Err(e)=>return Err(e)
+fn readtest() -> Result<(), Box<dyn std::error::Error>> {
+    use std::str::FromStr;
+    let testpath = PathBuf::from_str(".\\ASD403-05_購入品（ワーク加工部）.xlsx").unwrap();
+    match readexcel(&testpath) {
+        Ok(st) => {
+            println!("{:?}", st);
+        }
+        Err(e) => return Err(e),
     };
     Ok(())
 }

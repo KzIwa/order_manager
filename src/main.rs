@@ -107,7 +107,10 @@ impl ReloadDialog {
                 match settingitem {
                     Ok(st) => {
                         let targetfolder = st.searchfolder;
-                        diffcopy(&num, &targetfolder).unwrap();
+                        match diffcopy(&num, &targetfolder) {
+                            Ok(_) => (),
+                            Err(e) => return Some(e.to_string()),
+                        };
                         match read_excel_files(num, dbtemp_path) {
                             Ok(getitems) => {
                                 let statustext =
@@ -125,13 +128,13 @@ impl ReloadDialog {
                                 }
                                 Some(statustext)
                             }
-                            Err(_) => Some("".to_string()),
+                            Err(e) => Some(e.to_string()),
                         }
                     }
                     Err(_) => Some("C:\\Database\\partsetting.txtが見つかりません".to_string()),
                 }
             }
-            _ => Some("".to_string()),
+            Err(e) => Some(e.to_string()),
         }
     }
 }
@@ -139,11 +142,8 @@ impl ReloadDialog {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 年毎にデータベースを作成し年で選択する
     let dbfolder = "C:\\Database";
-    match fs::read_dir(dbfolder) {
-        Ok(_) => {}
-        Err(_) => {
-            fs::create_dir(dbfolder).unwrap();
-        }
+    if let Err(_) = fs::read_dir(dbfolder) {
+        fs::create_dir(dbfolder)?;
     }
     guiapp();
     Ok(())
@@ -225,6 +225,8 @@ fn pretty_print_int(i: i32) -> String {
 
 fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> PartsItem {
     // エクセルから読み取ったデータをPartsItem構造体に変換
+
+    // dataから値を取り出すクロージャ
     let getext = |x: usize| {
         if data.len() < x + 1 {
             "".to_string()
@@ -232,35 +234,38 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> Par
             data[x].to_string()
         }
     };
-    let ordernamesub=match namesub.split_once("."){
-        Some(sn) =>sn.0,
-        None=>namesub
+
+    let ordernamesub = match namesub.split_once(".") {
+        Some(sn) => sn.0,
+        None => namesub,
     };
 
     PartsItem {
-        // db_id: 0,
         order_no: match ordername.split_once('_') {
-            Some(name) => {
-                match name.1.split_once('_'){
-                    Some(n)=>ordernamesub.to_string() + n.1,
-                    None =>ordernamesub.to_string() + name.1,
-                }},
-            // Some(name)=>ordername.to_string(),
+            Some(name) => match name.1.split_once('_') {
+                Some(n) => ordernamesub.to_string() + n.1,
+                None => ordernamesub.to_string() + name.1,
+            },
             None => ordernamesub.to_string() + ordername,
         },
+
         unit_no: match getext(0).parse::<i32>() {
             Ok(num) => num,
-            _ => 0,
+            Err(_) => 0,
         },
+
         parts_no: match getext(2).split_once('-') {
             Some(pno) => pno.1.to_string(),
             None => getext(2),
         },
+
         rev_mark: getext(3),
+
         name: getext(4),
         itemtype: getext(1),
         model: getext(5),
         maker: getext(6),
+
         itemqty: match getext(7).replace('計', "").parse::<i32>() {
             Ok(num) => num,
             _ => 0,
@@ -320,21 +325,18 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize, Box<dyn s
         Ok(_) => {
             for partype in ["購入", "加工"].into_iter() {
                 let pattern = format!("./**/*{partype}*.xlsx");
-                let targetfiles = glob(&pattern)?;
-                for itemname in targetfiles {
+                let targetfiles = glob(&pattern)?.filter_map(Result::ok);
+                for excelname in targetfiles {
                     // エクセルファイルのファイルパス
-                    let excelname = itemname?;
-
                     if let Ok(datavec) = readexcel(&excelname) {
                         let mut inner_counter = 0;
 
                         datavec.iter().for_each(|dt| {
                             let filename = excelname.file_name().unwrap().to_str().unwrap();
                             let ordername = excelname.parent().unwrap().to_str().unwrap();
-                            // let item = excelvec_to_partsitem(ordername, dt);
-                            let item = excelvec_to_partsitem(ordername, dt,filename);
+                            let item = excelvec_to_partsitem(ordername, dt, filename);
 
-                            if !filename.contains("~$") {
+                            if !filename.contains("~$") && !getitems.contains(&item) {
                                 getitems.push(item);
                                 inner_counter += 1;
                             }
@@ -349,6 +351,7 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize, Box<dyn s
             println!("{e}");
         }
     };
+    getitems.sort_by_key(|x| x.to_owned().unit_no);
     insertsql(datapath, &getitems)?;
     Ok(counter)
 }
@@ -419,6 +422,7 @@ pub struct DataViewApp {
     #[nwg_layout_item(layout: mylayout, col: 10, row: 3)]
     orderlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont),focus:false)]
+    // #[nwg_events(OnTextInput:[DataViewApp::update_view])]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 4, row_span: 1)]
     order_input: nwg::TextInput,
 

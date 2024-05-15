@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, Error};
 use std::path::Path;
 
 // 一時的にデータを保持して扱いやすくするための構造体
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 
 pub struct PartsItem {
     // pub db_id: i32,
@@ -136,7 +136,7 @@ pub fn order_readsql(
 
     conn.execute_batch("BEGIN;")?;
 
-    let mut state = conn.prepare("SELECT * From partstable WHERE itemtype == ?")?;
+    let mut state = conn.prepare("SELECT DISTINCT * From partstable WHERE itemtype == ?")?;
     let partsitem_iter = state.query_map(params![itemtype], |row| {
         Ok(PartsItem {
             // db_id: row.get(0)?,
@@ -186,37 +186,65 @@ fn select_order(
     parts: impl Iterator<Item = PartsItem>,
     ordercheck: &bool,
 ) -> Vec<PartsItem> {
-    let mut result = Vec::new();
-    parts.for_each(|it| {
-        // 納期超過チェック
-        if ordercheck.to_owned()
-            && (it.condition.contains('済')
-                || it.condition.contains("在庫")
-                || it.condition.contains("キャンセル")
-                || it.name.contains("欠番"))
-        {
-        } else if pat.is_empty() {
-            result.push(it);
-        } else {
-            let searchwords = pat.split_whitespace();
-            let mut iscontain = true;
-            for searchword in searchwords {
-                if !it
-                    .order_no
-                    .to_lowercase()
-                    .contains(&searchword.to_lowercase())
-                {
-                    iscontain = false;
-                    break;
-                }
-            }
+    if pat.is_empty() {
+        return parts.collect();
+    } else {
+        let parts = parts.filter(|it| {
+            // 納期超過チェック
+            !(ordercheck.to_owned()
+                && (it.condition.contains('済')
+                    || it.condition.contains("在庫")
+                    || it.condition.contains("キャンセル")
+                    || it.name.contains("欠番")))
+        });
 
-            if iscontain {
-                result.push(it)
-            }
-        }
-    });
-    result
+        // let searchwords: Rc<Vec<&str>> = Rc::new(pat.split_whitespace().collect());
+        let searchwords: Vec<_> = pat.split_whitespace().collect();
+
+        let result = parts
+            .filter(|it| {
+                // let swords = Rc::clone(&searchwords);
+                for searchword in searchwords.iter() {
+                    if !it
+                        .order_no
+                        .to_lowercase()
+                        .contains(&searchword.to_lowercase())
+                    {
+                        return false;
+                    };
+                }
+                true
+            })
+            .collect();
+        // parts.for_each(|it| {
+        // if ordercheck.to_owned()
+        //     && (it.condition.contains('済')
+        //         || it.condition.contains("在庫")
+        //         || it.condition.contains("キャンセル")
+        //         || it.name.contains("欠番"))
+        // {
+        // } else if pat.is_empty() {
+        //     result.push(it);
+        // } else {
+        //     let swords = Rc::clone(&searchwords);
+        //     let mut iscontain = true;
+        //     for searchword in swords.iter() {
+        //         if !it
+        //             .order_no
+        //             .to_lowercase()
+        //             .contains(&searchword.to_lowercase())
+        //         {
+        //             iscontain = false;
+        //             break;
+        //         }
+        //     }
+
+        //     if iscontain {
+        //         result.push(it)
+        //     }
+        // });
+        result
+    }
 }
 
 fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
@@ -226,12 +254,17 @@ fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
 
     match pat.parse::<i32>() {
         Ok(n) => {
-            let mut result = Vec::new();
-            parts.iter().for_each(|it| {
-                if it.unit_no == n {
-                    result.push(it.to_owned());
-                }
-            });
+            let result = parts
+                .iter()
+                .filter(|it| it.unit_no == n)
+                .map(|p| p.to_owned())
+                .collect();
+            // let mut result = Vec::new();
+            // parts.iter().for_each(|it| {
+            //     if it.unit_no == n {
+            //         result.push(it.to_owned());
+            //     }
+            // });
             result
         }
         Err(_) => parts.to_vec(),
@@ -254,22 +287,33 @@ fn search_word(searchword: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
             || it.vender.contains(pattern)
     };
 
-    let mut result: Vec<PartsItem> = Vec::new();
+    // let mut result: Vec<PartsItem> = Vec::new();
     let patterns: Vec<&str> = pat.split_whitespace().collect();
-
-    parts.iter().for_each(|it| {
-        let mut is_ok = true;
-
-        patterns.iter().for_each(|pattern| {
-            if is_pattern(it, pattern) {
-            } else {
-                is_ok = false;
+    let result: Vec<_> = parts
+        .iter()
+        .filter(|it| {
+            for pattern in &patterns {
+                if !is_pattern(it, pattern) {
+                    return false;
+                }
             }
-        });
-        if is_ok {
-            result.push(it.to_owned());
-        }
-    });
+            true
+        })
+        .map(|item| item.to_owned())
+        .collect();
+    // parts.iter().for_each(|it| {
+    //     let mut is_ok = true;
+
+    //     patterns.iter().for_each(|pattern| {
+    //         if is_pattern(it, pattern) {
+    //         } else {
+    //             is_ok = false;
+    //         }
+    //     });
+    //     if is_ok {
+    //         result.push(it.to_owned());
+    //     }
+    // });
     result
 }
 
