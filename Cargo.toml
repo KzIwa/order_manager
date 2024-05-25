@@ -9,7 +9,7 @@ edition = "2021"
 native-windows-gui = "1.0.13"
 native-windows-derive = "1.0.5"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
-calamine = "0.24.0"
+calamine = "0.25.0"
 glob = "0.3.1"
 # chronoのバージョンアップは注意。不可逆的なダメージを負ったことがある
 chrono = "0.4.26"

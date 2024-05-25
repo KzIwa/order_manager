@@ -132,7 +132,6 @@ pub fn order_readsql(
     ordercheck: &bool, // 納期超過チェックフラグ
 ) -> Result<Vec<PartsItem>, Error> {
     let conn = Connection::open(savepath)?;
-    // let mut result: Vec<PartsItem> = Vec::new();
 
     conn.execute_batch("BEGIN;")?;
 
@@ -161,22 +160,12 @@ pub fn order_readsql(
 
     let partsitem_iter = partsitem_iter.flatten();
 
-    // for item in partsitem_iter.flatten() {
-    //     // if let Ok(it) = item {
-    //     //     let item = it;
-    //     result.push(item)
-    //     // }
-    // }
-
     conn.execute_batch("COMMIT;")?;
 
-    let result = search_word(
-        searchword.trim(),
-        &select_unit(
-            unitno.trim_end(),
-            &select_order(orderno.trim(), partsitem_iter, ordercheck),
-        ),
-    );
+    let selected_order_item = select_order(orderno.trim(), partsitem_iter, ordercheck);
+    let selected_unit_item = select_unit(unitno.trim_end(), selected_order_item);
+
+    let result = search_word(searchword.trim(), selected_unit_item);
 
     Ok(result)
 }
@@ -186,24 +175,14 @@ fn select_order(
     parts: impl Iterator<Item = PartsItem>,
     ordercheck: &bool,
 ) -> Vec<PartsItem> {
+    let mut result: Vec<PartsItem>;
     if pat.is_empty() {
-        return parts.collect();
+        result = parts.collect();
     } else {
-        let parts = parts.filter(|it| {
-            // 納期超過チェック
-            !(ordercheck.to_owned()
-                && (it.condition.contains('済')
-                    || it.condition.contains("在庫")
-                    || it.condition.contains("キャンセル")
-                    || it.name.contains("欠番")))
-        });
-
-        // let searchwords: Rc<Vec<&str>> = Rc::new(pat.split_whitespace().collect());
         let searchwords: Vec<_> = pat.split_whitespace().collect();
 
-        let result = parts
+        result = parts
             .filter(|it| {
-                // let swords = Rc::clone(&searchwords);
                 for searchword in searchwords.iter() {
                     if !it
                         .order_no
@@ -216,66 +195,44 @@ fn select_order(
                 true
             })
             .collect();
-        // parts.for_each(|it| {
-        // if ordercheck.to_owned()
-        //     && (it.condition.contains('済')
-        //         || it.condition.contains("在庫")
-        //         || it.condition.contains("キャンセル")
-        //         || it.name.contains("欠番"))
-        // {
-        // } else if pat.is_empty() {
-        //     result.push(it);
-        // } else {
-        //     let swords = Rc::clone(&searchwords);
-        //     let mut iscontain = true;
-        //     for searchword in swords.iter() {
-        //         if !it
-        //             .order_no
-        //             .to_lowercase()
-        //             .contains(&searchword.to_lowercase())
-        //         {
-        //             iscontain = false;
-        //             break;
-        //         }
-        //     }
-
-        //     if iscontain {
-        //         result.push(it)
-        //     }
-        // });
-        result
     }
+
+    if *ordercheck {
+        result = result
+            .iter()
+            .filter(|it| {
+                !(it.condition.contains('済')
+                    || it.condition.contains("在庫")
+                    || it.condition.contains("キャンセル")
+                    || it.name.contains("欠番"))
+            })
+            .map(|x| x.to_owned())
+            .collect();
+    };
+
+    result
 }
 
-fn select_unit(pat: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
+fn select_unit(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
     if pat.is_empty() {
-        return parts.to_vec();
+        return parts;
     }
 
     match pat.parse::<i32>() {
-        Ok(n) => {
-            let result = parts
-                .iter()
-                .filter(|it| it.unit_no == n)
-                .map(|p| p.to_owned())
-                .collect();
-            // let mut result = Vec::new();
-            // parts.iter().for_each(|it| {
-            //     if it.unit_no == n {
-            //         result.push(it.to_owned());
-            //     }
-            // });
-            result
-        }
-        Err(_) => parts.to_vec(),
+        Ok(n) => parts
+            .iter()
+            .filter(|it| it.unit_no == n)
+            .map(|p| p.to_owned())
+            .collect(),
+        Err(_) => parts,
     }
     // output
 }
 
-fn search_word(searchword: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
+fn search_word(searchword: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
     let pat = searchword.trim().to_string();
     if pat.is_empty() {
-        return parts.to_vec();
+        return parts;
     }
 
     // 小文字変換してオーダー番号、名前、型式、メーカ、備考、商社の中でヒットする項目を探す
@@ -301,19 +258,6 @@ fn search_word(searchword: &str, parts: &[PartsItem]) -> Vec<PartsItem> {
         })
         .map(|item| item.to_owned())
         .collect();
-    // parts.iter().for_each(|it| {
-    //     let mut is_ok = true;
-
-    //     patterns.iter().for_each(|pattern| {
-    //         if is_pattern(it, pattern) {
-    //         } else {
-    //             is_ok = false;
-    //         }
-    //     });
-    //     if is_ok {
-    //         result.push(it.to_owned());
-    //     }
-    // });
     result
 }
 

@@ -374,7 +374,6 @@ fn guiapp() {
 pub struct DataViewApp {
     // PopUpダイアログでやり取りするための変数
     dialog_data: RefCell<Option<thread::JoinHandle<String>>>,
-
     // マクロを使ってwindow 構成を生成している
     #[nwg_control(size:(1500,500), position: (300, 300), title: "部品管理")]
     #[nwg_events( OnWindowClose:[DataViewApp::exit],OnInit: [DataViewApp::load_data])]
@@ -404,10 +403,15 @@ pub struct DataViewApp {
     #[nwg_events(OnButtonClick:[DataViewApp::google_search])]
     google_btn: nwg::Button,
 
-    // 年度
-    #[nwg_control(text: "年代",font: Some(&data.appfont))]
+    //並べ順選択ボックス
+    #[nwg_control(font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 1)]
-    yearlabel: nwg::Label,
+    #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
+    sort_type: nwg::ComboBox<&'static str>,
+    // // 年度
+    // #[nwg_control(text: "年代",font: Some(&data.appfont))]
+    // #[nwg_layout_item(layout: mylayout, col: 10, row: 1)]
+    // yearlabel: nwg::Label,
     // #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
     // #[nwg_layout_item(layout: mylayout, col: 10, row: 2)]
     // #[nwg_events()]
@@ -527,6 +531,8 @@ impl DataViewApp {
         self.konyu_data();
         self.partstype.set_collection(vec!["購入", "加工"]);
         self.partstype.set_selection(Some(0));
+        self.sort_type.set_collection(vec!["番号順", "発注順"]);
+        self.sort_type.set_selection(Some(0));
         self.set_year_select();
         self.year_input.set_selection(Some(0));
     }
@@ -628,7 +634,7 @@ impl DataViewApp {
         let selectunit = self.unit_input.text();
         let databasepath = Path::new(selectdir.as_str());
         // アイテムを絞り込み検索
-        let contents = order_readsql(
+        let mut contents = order_readsql(
             databasepath,
             &select_order,
             &selectedtype,
@@ -636,6 +642,11 @@ impl DataViewApp {
             &search_word,
             &orderedcheck,
         )?;
+
+        if self.sort_type.selection_string().unwrap() == "発注順" {
+            contents.sort_by_key(|k| k.order_date.to_owned());
+            contents.reverse();
+        }
 
         self.statuslabel1
             .set_text(format!("{}→{}件の該当項目があります", search_word, contents.len()).as_str());
