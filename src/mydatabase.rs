@@ -1,5 +1,3 @@
-// use chrono::prelude::*;
-// use chrono::{DateTime, Local, TimeZone};
 use rusqlite::{params, Connection, Error};
 use std::path::Path;
 
@@ -175,30 +173,29 @@ fn select_order(
     parts: impl Iterator<Item = PartsItem>,
     ordercheck: &bool,
 ) -> Vec<PartsItem> {
-    let mut result: Vec<PartsItem>;
-    if pat.is_empty() {
-        result = parts.collect();
-    } else {
-        let searchwords: Vec<_> = pat.split_whitespace().collect();
+    let searchwords: Vec<_> = pat.split_whitespace().collect();
 
-        result = parts
-            .filter(|it| {
-                for searchword in searchwords.iter() {
-                    if !it
-                        .order_no
-                        .to_lowercase()
-                        .contains(&searchword.to_lowercase())
-                    {
-                        return false;
-                    };
-                }
-                true
-            })
-            .collect();
-    }
+    let is_match_word = |it: &PartsItem| {
+        for searchword in searchwords.iter() {
+            if !it
+                .order_no
+                .to_lowercase()
+                .contains(&searchword.to_lowercase())
+            {
+                return false;
+            };
+        }
+        true
+    };
+
+    let result: Vec<_> = if pat.is_empty() {
+        parts.collect()
+    } else {
+        parts.filter(is_match_word).collect()
+    };
 
     if *ordercheck {
-        result = result
+        result
             .iter()
             .filter(|it| {
                 !(it.condition.contains('済')
@@ -207,10 +204,10 @@ fn select_order(
                     || it.name.contains("欠番"))
             })
             .map(|x| x.to_owned())
-            .collect();
-    };
-
-    result
+            .collect()
+    } else {
+        result
+    }
 }
 
 fn select_unit(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {

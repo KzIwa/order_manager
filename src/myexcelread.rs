@@ -16,12 +16,6 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>, Box<dyn std::er
     match range {
         Ok(rng) => {
             rng.rows().for_each(|row| {
-                // let mut exlinedata: Vec<String> = Vec::new();
-                // for col in row.iter() {
-                //     if let Some(cellitem) = parse_celldata(col) {
-                //         exlinedata.push(cellitem);
-                //     }
-                // }
                 let mut exlinedata: Vec<_> =
                     row.iter().filter_map(|col| parse_celldata(col)).collect();
                 // 出力例

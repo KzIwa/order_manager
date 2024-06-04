@@ -351,6 +351,7 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize, Box<dyn s
             println!("{e}");
         }
     };
+
     getitems.sort_by_key(|x| x.to_owned().unit_no);
     insertsql(datapath, &getitems)?;
     Ok(counter)
