@@ -160,78 +160,56 @@ pub fn order_readsql(
 
     conn.execute_batch("COMMIT;")?;
 
-    let selected_order_item = select_order(orderno.trim(), partsitem_iter, ordercheck);
-    let selected_unit_item = select_unit(unitno.trim_end(), selected_order_item);
-
-    let result = search_word(searchword.trim(), selected_unit_item);
-
-    Ok(result)
-}
-
-fn select_order(
-    pat: &str,
-    parts: impl Iterator<Item = PartsItem>,
-    ordercheck: &bool,
-) -> Vec<PartsItem> {
-    let searchwords: Vec<_> = pat.split_whitespace().collect();
-
-    let is_match_word = |it: &PartsItem| {
-        for searchword in searchwords.iter() {
-            if !it
-                .order_no
-                .to_lowercase()
-                .contains(&searchword.to_lowercase())
-            {
-                return false;
-            };
-        }
-        true
-    };
-
-    let result: Vec<_> = if pat.is_empty() {
-        parts.collect()
-    } else {
-        parts.filter(is_match_word).collect()
-    };
+    let result = partsitem_iter.filter(|it| {
+        select_order(orderno.trim(), it)
+            && select_unit(unitno.trim(), it)
+            && search_word(searchword.trim(), it)
+    });
 
     if *ordercheck {
-        result
-            .iter()
+        Ok(result
             .filter(|it| {
                 !(it.condition.contains('済')
                     || it.condition.contains("在庫")
                     || it.condition.contains("キャンセル")
                     || it.name.contains("欠番"))
             })
-            .map(|x| x.to_owned())
-            .collect()
+            .collect())
     } else {
-        result
+        Ok(result.collect())
     }
 }
 
-fn select_unit(pat: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
-    if pat.is_empty() {
-        return parts;
+fn select_order(orderno: &str, parts: &PartsItem) -> bool {
+    if orderno.trim().is_empty() {
+        return true;
+    };
+    let searchwords = orderno.split_whitespace();
+    for searchword in searchwords {
+        if !parts
+            .order_no
+            .to_lowercase()
+            .contains(&searchword.to_lowercase())
+        {
+            return false;
+        };
     }
-
-    match pat.parse::<i32>() {
-        Ok(n) => parts
-            .iter()
-            .filter(|it| it.unit_no == n)
-            .map(|p| p.to_owned())
-            .collect(),
-        Err(_) => parts,
-    }
-    // output
+    true
 }
+fn select_unit(unitno: &str, parts: &PartsItem) -> bool {
+    if unitno.trim().is_empty() {
+        return true;
+    };
 
-fn search_word(searchword: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
-    let pat = searchword.trim().to_string();
-    if pat.is_empty() {
-        return parts;
+    match unitno.parse::<i32>() {
+        Ok(n) => parts.unit_no == n,
+        Err(_) => true,
     }
-
+}
+fn search_word(searchwords: &str, parts: &PartsItem) -> bool {
+    if searchwords.trim().is_empty() {
+        return true;
+    };
     // 小文字変換してオーダー番号、名前、型式、メーカ、備考、商社の中でヒットする項目を探す
     let is_pattern = |it: &PartsItem, pattern: &str| {
         it.name.to_lowercase().contains(&pattern.to_lowercase())
@@ -240,44 +218,10 @@ fn search_word(searchword: &str, parts: Vec<PartsItem>) -> Vec<PartsItem> {
             || it.remarks.contains(pattern)
             || it.vender.contains(pattern)
     };
-
-    // let mut result: Vec<PartsItem> = Vec::new();
-    let patterns: Vec<&str> = pat.split_whitespace().collect();
-    let result: Vec<_> = parts
-        .iter()
-        .filter(|it| {
-            for pattern in &patterns {
-                if !is_pattern(it, pattern) {
-                    return false;
-                }
-            }
-            true
-        })
-        .map(|item| item.to_owned())
-        .collect();
-    result
+    for pattern in searchwords.split_whitespace() {
+        if !is_pattern(parts, pattern) {
+            return false;
+        }
+    }
+    true
 }
-
-// fn string_to_time(st: &str) -> Option<DateTime<Local>> {
-//     let st = st.to_string() + " 00:00:00";
-
-//     let result = Local.datetime_from_str(&st, "%Y-%m-%d %H:%M:%S");
-//     match result {
-//         Ok(time) => Some(time),
-//         Err(_) => None,
-//     }
-// }
-
-// fn isnot_over(item: &PartsItem) -> bool {
-//     let today = Local::now();
-//     if item.delivery_date.trim() == "" {
-//         return true;
-//     }
-//     let delidate = string_to_time(item.delivery_date.trim());
-//     match delidate {
-//         Some(date) => {
-//             !(today.naive_local().date() >= date.date_naive() && item.delicondition.trim() == "")
-//         }
-//         None => true,
-//     }
-// }

@@ -104,6 +104,7 @@ impl ReloadDialog {
                 let databasepath = Path::new(dpath.as_str());
                 let temppath = self.get_database_path(9999);
                 let dbtemp_path = Path::new(temppath.as_str());
+
                 match settingitem {
                     Ok(st) => {
                         let targetfolder = st.searchfolder;
@@ -142,7 +143,7 @@ impl ReloadDialog {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 年毎にデータベースを作成し年で選択する
     let dbfolder = "C:\\Database";
-    if let Err(_) = fs::read_dir(dbfolder) {
+    if fs::read_dir(dbfolder).is_err() {
         fs::create_dir(dbfolder)?;
     }
     guiapp();
@@ -235,12 +236,12 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> Par
         }
     };
 
-    let ordernamesub = match namesub.split_once(".") {
+    let ordernamesub = match namesub.split_once('.') {
         Some(sn) => sn.0,
         None => namesub,
     };
 
-    PartsItem {
+    let parts_item = PartsItem {
         order_no: match ordername.split_once('_') {
             Some(name) => match name.1.split_once('_') {
                 Some(n) => ordernamesub.to_string() + n.1,
@@ -249,10 +250,7 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> Par
             None => ordernamesub.to_string() + ordername,
         },
 
-        unit_no: match getext(0).parse::<i32>() {
-            Ok(num) => num,
-            Err(_) => 0,
-        },
+        unit_no: getext(0).parse::<i32>().unwrap_or(0),
 
         parts_no: match getext(2).split_once('-') {
             Some(pno) => pno.1.to_string(),
@@ -280,7 +278,8 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> Par
             Ok(num) => num,
             _ => 0,
         },
-    }
+    };
+    parts_item
 }
 
 fn delete_db_file(datapath: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -391,6 +390,7 @@ pub struct DataViewApp {
     // レイアウト管理
     #[nwg_layout(parent:window,max_row:Some(16),spacing:3)]
     mylayout: nwg::GridLayout,
+
     // 部品リスト
     #[nwg_control(item_count: 16,list_style:nwg::ListViewStyle::Detailed,
         ex_flags: nwg::ListViewExFlags::AUTO_COLUMN_SIZE | nwg::ListViewExFlags::FULL_ROW_SELECT)]
@@ -410,13 +410,6 @@ pub struct DataViewApp {
     #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
     sort_type: nwg::ComboBox<&'static str>,
     // // 年度
-    // #[nwg_control(text: "年代",font: Some(&data.appfont))]
-    // #[nwg_layout_item(layout: mylayout, col: 10, row: 1)]
-    // yearlabel: nwg::Label,
-    // #[nwg_control(text: "",font: Some(&data.appfont),focus:true)]
-    // #[nwg_layout_item(layout: mylayout, col: 10, row: 2)]
-    // #[nwg_events()]
-    // year_input: nwg::TextInput,
     #[nwg_control(font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 2)]
     #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]

@@ -16,15 +16,14 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>, Box<dyn std::er
     match range {
         Ok(rng) => {
             rng.rows().for_each(|row| {
-                let mut exlinedata: Vec<_> =
-                    row.iter().filter_map(|col| parse_celldata(col)).collect();
+                let mut exlinedata: Vec<_> = row.iter().filter_map(parse_celldata).collect();
                 // 出力例
                 // 90:購入:AOB202-90-102:セットカラー:PSCS20-10:ミスミ:1:手配済:ミスミ:760:760:
                 // 読み取ったデータ配列長さが5よりも大きく,材質および型式の欄が空でない場合
                 if exlinedata.len() > 5 && !exlinedata[4].is_empty() {
                     match exlinedata[1].trim() {
                         "加工" | "購入" => {
-                            if &exlinedata[0] == "" {
+                            if exlinedata[0].is_empty() {
                                 if let Some(unit_no) = rng.get_value((3, 2)) {
                                     if let Some(unit_no) = parse_celldata(unit_no) {
                                         exlinedata[0] = unit_no;
