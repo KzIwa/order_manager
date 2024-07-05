@@ -162,7 +162,7 @@ pub fn order_readsql(
 
     let result = partsitem_iter.filter(|it| {
         select_order(orderno.trim(), it)
-            && select_unit(unitno.trim(), it)
+            && select_multi_units(unitno.trim(), it)
             && search_word(searchword.trim(), it)
     });
 
@@ -181,7 +181,7 @@ pub fn order_readsql(
 }
 
 fn select_order(orderno: &str, parts: &PartsItem) -> bool {
-    if orderno.trim().is_empty() {
+    if orderno.is_empty() {
         return true;
     };
     let searchwords = orderno.split_whitespace();
@@ -196,18 +196,34 @@ fn select_order(orderno: &str, parts: &PartsItem) -> bool {
     }
     true
 }
-fn select_unit(unitno: &str, parts: &PartsItem) -> bool {
-    if unitno.trim().is_empty() {
+fn select_multi_units(unitno: &str, parts: &PartsItem) -> bool {
+    if unitno.is_empty() {
         return true;
     };
-
-    match unitno.parse::<i32>() {
-        Ok(n) => parts.unit_no == n,
-        Err(_) => true,
+    let multi_units = unitno
+        .split_whitespace()
+        .map(|x| x.parse::<i32>().unwrap_or(0));
+    for unit in multi_units {
+        if parts.unit_no == unit {
+            return true;
+        }
     }
+    false
 }
+
+// fn select_unit(unitno: &str, parts: &PartsItem) -> bool {
+//     if unitno.is_empty() {
+//         return true;
+//     };
+
+//     match unitno.parse::<i32>() {
+//         Ok(n) => parts.unit_no == n,
+//         Err(_) => true,
+//     }
+// }
+
 fn search_word(searchwords: &str, parts: &PartsItem) -> bool {
-    if searchwords.trim().is_empty() {
+    if searchwords.is_empty() {
         return true;
     };
     // 小文字変換してオーダー番号、名前、型式、メーカ、備考、商社の中でヒットする項目を探す
