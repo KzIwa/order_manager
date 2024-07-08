@@ -16,9 +16,10 @@ use std::collections::HashMap;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use std::{env, fs};
-use webbrowser::{self, Browser};
+use webbrowser::Browser;
 
 use std::{cell::RefCell, thread};
+use url::{self, Url};
 
 /// The dialog UI
 #[derive(Default, NwgUi)]
@@ -645,53 +646,59 @@ impl DataViewApp {
         self.statuslabel1
             .set_text(format!("{}→{}件の該当項目があります", search_word, contents.len()).as_str());
         let mut has_zero = false;
+
         let settingitem = SettingItem::new();
+
+        let to_list_item = |items: &PartsItem, gpartprice: i32| {
+            [
+                items.order_no.to_string(),
+                items.unit_no.to_string(),
+                items.parts_no.to_string(),
+                items.name.to_string(),
+                items.model.to_string(),
+                items.maker.to_string(),
+                items.itemqty.to_string(),
+                items.remarks.to_string(),
+                items.condition.to_string(),
+                items.vender.to_string(),
+                items.order_date.to_string(),
+                items.delivery_date.to_string(),
+                items.delicondition.to_string(),
+                pretty_print_int(items.price),
+                pretty_print_int(gpartprice),
+            ]
+        };
 
         match settingitem {
             Ok(st) => {
                 self.search_btn.set_enabled(false);
                 let listlimit = st.maxdisplay_linenumber;
+                let dataview = &self.data_view;
                 // guiにアイテムをセット
-                for (indexnum, items) in contents.iter().enumerate() {
-                    let gpartprice = items.price * items.itemqty;
-                    if gpartprice == 0
-                        && items.name.trim() != "欠番"
-                        && !items.remarks.contains("支給品")
-                    {
-                        has_zero = true
-                    };
+                contents
+                    .iter()
+                    .take(listlimit)
+                    .enumerate()
+                    .for_each(|(indexnum, items)| {
+                        let gpartprice = items.price * items.itemqty;
+                        if gpartprice == 0
+                            && items.name.trim() != "欠番"
+                            && !items.remarks.contains("支給品")
+                        {
+                            has_zero = true
+                        };
+                        grossprice += gpartprice;
 
-                    grossprice += gpartprice;
-                    // string_to_time(&items.delivery_date);
-                    let toitem = [
-                        items.order_no.to_string(),
-                        items.unit_no.to_string(),
-                        items.parts_no.to_string(),
-                        items.name.to_string(),
-                        items.model.to_string(),
-                        items.maker.to_string(),
-                        items.itemqty.to_string(),
-                        items.remarks.to_string(),
-                        items.condition.to_string(),
-                        items.vender.to_string(),
-                        items.order_date.to_string(),
-                        items.delivery_date.to_string(),
-                        items.delicondition.to_string(),
-                        pretty_print_int(items.price),
-                        pretty_print_int(gpartprice),
-                        // items.db_id.to_string(),
-                    ];
+                        // GUIの表の構成
+                        let toitem = to_list_item(items, gpartprice);
+                        dataview.insert_items_row(Some(indexnum as i32), &toitem);
+                    });
 
-                    // GUIの表の構成
-                    let dataview = &self.data_view;
-                    dataview.insert_items_row(Some(indexnum as i32), &toitem);
-
-                    if indexnum > listlimit {
-                        self.statuslabel1
-                            .set_text(format!("{listlimit}件までを表示しています。").as_str());
-                        break;
-                    }
+                if contents.len() > listlimit {
+                    self.statuslabel1
+                        .set_text(format!("{listlimit}件までを表示しています。").as_str());
                 }
+
                 self.search_btn.set_enabled(true);
             }
             Err(_) => self
@@ -735,18 +742,62 @@ impl DataViewApp {
             Some(row) => {
                 let model = listview.item(row, 4, 30).unwrap().text;
                 let maker = listview.item(row, 5, 20).unwrap().text;
-                let searchword = format!("{model} {maker}");
-                let open_url = format!("https://www.google.com/search?q={searchword}");
-                match webbrowser::open_browser(Browser::Default, &open_url) {
-                    Ok(_) => self
-                        .statuslabel1
-                        .set_text(format!("{searchword}をWEB検索").as_str()),
-                    Err(e) => self.statuslabel1.set_text(format!("{e}").as_str()),
-                }
+                let mut searchword: String = String::new();
+
+                let open_url = match maker.to_lowercase().as_str() {
+                    "ミスミ" => {
+                        searchword = model.to_string();
+                        let itemurl = format!(
+                        "https://jp.misumi-ec.com/vona2/result/?Keyword={searchword}+&isReSearch=0"
+                    );
+                        Some(itemurl)
+                    }
+                    "sus" => {
+                        searchword = model.to_string();
+                        let itemurl =
+                            format!("https://fa.sus.co.jp/service/list?word_box={searchword}");
+                        Some(itemurl)
+                    }
+                    "キーエンス" => {
+                        searchword = model.to_string();
+                        let itemurl =
+                            format!("https://www.keyence.co.jp/search/all/?q={searchword}");
+                        Some(itemurl)
+                    }
+                    "iai" => {
+                        let google_searchword = format!("{model} site:www.iai-robot.co.jp");
+                        let itemurl =
+                            format!("https://www.google.com/search?q={google_searchword}");
+                        Some(itemurl)
+                    }
+                    _ => None,
+                };
+
+                let google_searchword = format!("{model} {maker}");
+                let google_url = format!("https://www.google.com/search?q={google_searchword}");
+
+                if let Some(ourl) = open_url {
+                    if is_valid_url(&ourl) {
+                        self.open_mybrowser(&ourl, &searchword);
+                    } else {
+                        self.open_mybrowser(&google_url, &google_searchword);
+                    }
+                } else {
+                    self.open_mybrowser(&google_url, &google_searchword)
+                };
             }
             None => self
                 .statuslabel1
                 .set_text("検索エラー:アイテムを選択してください"),
+        }
+    }
+
+    fn open_mybrowser(&self, url: &str, searchword: &str) {
+        match webbrowser::open_browser(Browser::Default, url) {
+            Ok(_) => self
+                .statuslabel1
+                .set_text(format!("{searchword}をweb検索").as_str()),
+            Err(e) => self.statuslabel1.set_text(format!("{e}").as_str()),
         }
     }
 
@@ -778,7 +829,15 @@ impl DataViewApp {
         }
     }
 }
-
+fn is_valid_url(url_str: &str) -> bool {
+    match Url::parse(url_str) {
+        Ok(url) => {
+            // スキームとホストが存在することを確認
+            url.scheme() != "" && url.host().is_some()
+        }
+        Err(_) => false,
+    }
+}
 #[test]
 fn pretty_print_test() {
     assert_eq!(&pretty_print_int(0), "0");

@@ -541,6 +541,7 @@ dependencies = [
  "native-windows-derive",
  "native-windows-gui",
  "rusqlite",
+ "url",
  "webbrowser",
 ]
 

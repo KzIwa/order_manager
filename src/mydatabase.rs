@@ -202,7 +202,7 @@ fn select_multi_units(unitno: &str, parts: &PartsItem) -> bool {
     };
     let multi_units = unitno
         .split_whitespace()
-        .map(|x| x.parse::<i32>().unwrap_or(0));
+        .map(|x| x.parse::<i32>().unwrap_or(99999));
     for unit in multi_units {
         if parts.unit_no == unit {
             return true;
@@ -211,21 +211,11 @@ fn select_multi_units(unitno: &str, parts: &PartsItem) -> bool {
     false
 }
 
-// fn select_unit(unitno: &str, parts: &PartsItem) -> bool {
-//     if unitno.is_empty() {
-//         return true;
-//     };
-
-//     match unitno.parse::<i32>() {
-//         Ok(n) => parts.unit_no == n,
-//         Err(_) => true,
-//     }
-// }
-
 fn search_word(searchwords: &str, parts: &PartsItem) -> bool {
     if searchwords.is_empty() {
         return true;
     };
+
     // 小文字変換してオーダー番号、名前、型式、メーカ、備考、商社の中でヒットする項目を探す
     let is_pattern = |it: &PartsItem, pattern: &str| {
         it.name.to_lowercase().contains(&pattern.to_lowercase())
@@ -234,6 +224,7 @@ fn search_word(searchwords: &str, parts: &PartsItem) -> bool {
             || it.remarks.contains(pattern)
             || it.vender.contains(pattern)
     };
+
     for pattern in searchwords.split_whitespace() {
         if !is_pattern(parts, pattern) {
             return false;
