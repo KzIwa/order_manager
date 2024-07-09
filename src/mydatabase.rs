@@ -160,11 +160,13 @@ pub fn order_readsql(
 
     conn.execute_batch("COMMIT;")?;
 
-    let result = partsitem_iter.filter(|it| {
+    let parts_selector = |it: &PartsItem| {
         select_order(orderno.trim(), it)
             && select_multi_units(unitno.trim(), it)
             && search_word(searchword.trim(), it)
-    });
+    };
+
+    let result = partsitem_iter.filter(parts_selector);
 
     if *ordercheck {
         Ok(result
@@ -184,31 +186,21 @@ fn select_order(orderno: &str, parts: &PartsItem) -> bool {
     if orderno.is_empty() {
         return true;
     };
-    let searchwords = orderno.split_whitespace();
-    for searchword in searchwords {
-        if !parts
-            .order_no
-            .to_lowercase()
-            .contains(&searchword.to_lowercase())
-        {
-            return false;
-        };
-    }
-    true
+
+    orderno
+        .split_whitespace()
+        .all(|x| parts.order_no.to_lowercase().contains(&x.to_lowercase()))
 }
-fn select_multi_units(unitno: &str, parts: &PartsItem) -> bool {
-    if unitno.is_empty() {
+
+fn select_multi_units(unitsno: &str, parts: &PartsItem) -> bool {
+    if unitsno.is_empty() {
         return true;
     };
-    let multi_units = unitno
+
+    unitsno
         .split_whitespace()
-        .map(|x| x.parse::<i32>().unwrap_or(99999));
-    for unit in multi_units {
-        if parts.unit_no == unit {
-            return true;
-        }
-    }
-    false
+        .map(|x| x.parse::<i32>().unwrap_or(99999))
+        .any(|x| x == parts.unit_no)
 }
 
 fn search_word(searchwords: &str, parts: &PartsItem) -> bool {
@@ -225,10 +217,5 @@ fn search_word(searchwords: &str, parts: &PartsItem) -> bool {
             || it.vender.contains(pattern)
     };
 
-    for pattern in searchwords.split_whitespace() {
-        if !is_pattern(parts, pattern) {
-            return false;
-        }
-    }
-    true
+    searchwords.split_whitespace().all(|x| is_pattern(parts, x))
 }
