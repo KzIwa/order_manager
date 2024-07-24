@@ -156,8 +156,6 @@ pub fn order_readsql(
         })
     })?;
 
-    let partsitem_iter = partsitem_iter.flatten();
-
     conn.execute_batch("COMMIT;")?;
 
     let parts_selector = |it: &PartsItem| {
@@ -166,7 +164,7 @@ pub fn order_readsql(
             && search_word(searchword.trim(), it)
     };
 
-    let result = partsitem_iter.filter(parts_selector);
+    let result = partsitem_iter.flatten().filter(parts_selector);
 
     if *ordercheck {
         Ok(result

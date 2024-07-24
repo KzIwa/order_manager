@@ -20,3 +20,5 @@ chrono = "0.4.38"
 # webbrowser 0.8.0　~ 0.8.4系ではクラッシュが発生している
 webbrowser = "1.0.1"
 url = "2.5.2"
+walkdir = "2.5.0"
+globmatch = "0.3.0"

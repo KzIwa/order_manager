@@ -4,6 +4,7 @@ extern crate native_windows_gui as nwg;
 
 mod mydatabase;
 mod myexcelread;
+mod myfilefinder;
 mod robocopy;
 
 use glob::glob;
@@ -14,11 +15,13 @@ use nwg::NativeUi;
 use robocopy::diffcopy;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::thread;
 use std::{env, fs};
 use webbrowser::Browser;
 
-use std::{cell::RefCell, thread};
+use std::cell::RefCell;
 use url::{self, Url};
 
 /// The dialog UI
@@ -212,17 +215,24 @@ impl SettingItem {
 
 fn pretty_print_int(i: i32) -> String {
     // 千の桁カンマ区切りで文字列を返す
-    let mut s = String::new();
     let i_str = i.to_string();
-    let a = i_str.chars().rev().enumerate();
+    let strlen = i_str.len();
 
-    a.for_each(|(idx, val)| {
-        if idx != 0 && idx % 3 == 0 {
-            s.insert(0, ',');
+    let do_insert_comma = |idx, val: char| {
+        let pos = strlen - idx - 1;
+
+        if pos != 0 && pos % 3 == 0 {
+            val.to_string() + ","
+        } else {
+            val.to_string()
         }
-        s.insert(0, val);
-    });
-    s
+    };
+
+    i_str
+        .chars()
+        .enumerate()
+        .map(|(idx, val)| do_insert_comma(idx, val))
+        .collect()
 }
 
 fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> PartsItem {
@@ -402,7 +412,7 @@ pub struct DataViewApp {
     // google search
     #[nwg_control(text:"Google Search",size:(270,40))]
     #[nwg_layout_item(layout:mylayout,col: 10,row:0)]
-    #[nwg_events(OnButtonClick:[DataViewApp::google_search])]
+    #[nwg_events(OnButtonClick:[DataViewApp::item_search])]
     google_btn: nwg::Button,
 
     //並べ順選択ボックス
@@ -558,11 +568,13 @@ impl DataViewApp {
     fn konyu_data(&self) {
         self.data_view.update_column(4, "型式");
         self.data_view.update_column(5, "メーカ");
+        self.google_btn.set_text("Gooogle Search");
     }
 
     fn kakou_data(&self) {
         self.data_view.update_column(4, "材質");
         self.data_view.update_column(5, "処理");
+        self.google_btn.set_text("図面を開く")
     }
 
     fn update_view(&self) {
@@ -710,6 +722,7 @@ impl DataViewApp {
             self.statuslabel2.set_text("合計金額は不正確の可能性あり")
         }
         let gokeikingaku = format!("￥ {}", pretty_print_int(grossprice));
+
         self.grossprice.set_text(&gokeikingaku);
         // リストを選択状態にする
         dataview.select_item(0, true);
@@ -732,7 +745,67 @@ impl DataViewApp {
             let maker = listview.item(row, 5, 20).unwrap().text;
             self.statuslabel1
                 .set_text(format!("{maker}: {model}").as_str());
+            self.statuslabel2.set_text("");
         }
+    }
+    fn item_search(&self) {
+        let mode = self.partstype.selection_string();
+        if mode == Some("購入".to_string()) {
+            self.google_search();
+        } else if mode == Some("加工".to_string()) {
+            self.drawing_open();
+        }
+    }
+
+    fn drawing_open(&self) {
+        let listview = &self.data_view;
+        let selected_year = &self.year_input.selection_string();
+        let selected_row = listview.selected_item();
+        let target_order = selected_row
+            .and_then(|row| listview.item(row, 0, 30))
+            .map(|x| x.text.split('-').collect::<Vec<_>>()[0].to_string());
+
+        let target_unit = selected_row
+            .and_then(|row| listview.item(row, 1, 5))
+            .map(|x| x.text.split('-').collect::<Vec<_>>()[0].to_string());
+        let target_no = selected_row
+            .and_then(|row| listview.item(row, 2, 5))
+            .map(|x| x.text.split('-').collect::<Vec<_>>()[0].to_string());
+
+        let basepattern = target_order.clone().and_then(|order| {
+            target_unit.and_then(|unit| target_no.map(|no| order + "-" + &unit + "-" + &no))
+        });
+
+        if let Ok(st) = SettingItem::new() {
+            let mut basefolder = PathBuf::from(st.searchfolder);
+            if let Some(x) = selected_year.clone() {
+                basefolder.push(&x)
+            }
+
+            // let target_folder: Option<Vec<_>> =
+            //     target_order.and_then(|order| myfilefinder::find_folder_path(basefolder, &order));
+
+            // let items = target_folder.and_then(|dir| {
+            //     basepattern.map(move |base_p| {
+            //         myfilefinder::find_files(&dir[0], &base_p).collect::<Vec<_>>()
+            //     })
+            // });
+            let items = find_drawings(basefolder, target_order, basepattern);
+
+            let _result = items.map(|initems| {
+                let _ = initems
+                    .iter()
+                    .map(|it| opendir(it, true))
+                    .collect::<Vec<_>>();
+                self.statuslabel2.set_text(&format!(
+                    "{:?}を開きました",
+                    initems
+                        .iter()
+                        .map(|f| f.file_name().unwrap())
+                        .collect::<Vec<_>>()
+                ))
+            });
+        };
     }
 
     fn google_search(&self) {
@@ -768,6 +841,11 @@ impl DataViewApp {
                         let google_searchword = format!("{model} site:www.iai-robot.co.jp");
                         let itemurl =
                             format!("https://www.google.com/search?q={google_searchword}");
+                        Some(itemurl)
+                    }
+                    "smc" => {
+                        searchword = model.to_string();
+                        let itemurl =format!("https://www.smcworld.com/gsearch/ja-jp/search?query={searchword}&lang=ja_JP");
                         Some(itemurl)
                     }
                     _ => None,
@@ -838,11 +916,59 @@ fn is_valid_url(url_str: &str) -> bool {
         Err(_) => false,
     }
 }
+
+fn find_drawings(
+    basefolder: PathBuf,
+    target_order: Option<String>,
+    basepattern: Option<String>,
+) -> Option<Vec<PathBuf>> {
+    let target_folder: Option<Vec<_>> =
+        target_order.and_then(|order| myfilefinder::find_folder_path(basefolder, &order));
+
+    target_folder.and_then(|dir| {
+        basepattern.map(move |base_p| {
+            myfilefinder::files_search(dir[0].clone(), &base_p)
+                .unwrap()
+                .collect::<Vec<_>>()
+        })
+    })
+}
+
+fn opendir(fpath: &PathBuf, is_open_file: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if is_open_file {
+        // 対象ファイルのフォルダを既定のアプリで開く
+        #[cfg(target_os = "macos")]
+        Command::new("open").arg(fpath).spawn()?;
+
+        #[cfg(target_os = "windows")]
+        Command::new("explorer").arg(fpath).spawn()?;
+
+        #[cfg(target_os = "linux")]
+        Command::new("xdg-open").arg(fpath).spawn()?;
+        Ok(())
+    } else {
+        // 対象ファイルのフォルダをファインダーで開く
+        #[cfg(target_os = "macos")]
+        Command::new("open").arg(fpath.parent().unwrap()).spawn()?;
+
+        #[cfg(target_os = "windows")]
+        Command::new("explorer")
+            .arg(fpath.parent().unwrap())
+            .spawn()?;
+
+        #[cfg(target_os = "linux")]
+        Command::new("xdg-open")
+            .arg(fpath.parent().unwrap())
+            .spawn()?;
+        Ok(())
+    }
+}
 #[test]
 fn pretty_print_test() {
     assert_eq!(&pretty_print_int(0), "0");
     assert_eq!(&pretty_print_int(1), "1");
     assert_eq!(&pretty_print_int(200), "200");
+    assert_eq!(&pretty_print_int(01200), "1,200");
     assert_eq!(&pretty_print_int(1000), "1,000");
     assert_eq!(&pretty_print_int(50000), "50,000");
     assert_eq!(&pretty_print_int(900000), "900,000");
