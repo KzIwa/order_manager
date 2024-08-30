@@ -11,7 +11,7 @@ use glob::glob;
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
 use nwd::NwgUi;
-use nwg::{Event, EventData, ListViewColumnSortArrow, NativeUi};
+use nwg::{EventData, ListViewColumnSortArrow, NativeUi};
 use robocopy::diffcopy;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
@@ -603,6 +603,7 @@ impl DataViewApp {
 
     fn update_view(&self) {
         if self.clear_btn.enabled() {
+            (0..15).for_each(|col| self.data_view.set_column_sort_arrow(col, None));
             let value = self.partstype.selection_string();
             match value.as_ref().map(|x| x as &str) {
                 Some("購入") => {
