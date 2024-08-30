@@ -11,7 +11,7 @@ use glob::glob;
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
 use nwd::NwgUi;
-use nwg::NativeUi;
+use nwg::{Event, EventData, ListViewColumnSortArrow, NativeUi};
 use robocopy::diffcopy;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
@@ -406,7 +406,8 @@ pub struct DataViewApp {
     #[nwg_control(item_count: 16,list_style:nwg::ListViewStyle::Detailed,
         ex_flags: nwg::ListViewExFlags::AUTO_COLUMN_SIZE | nwg::ListViewExFlags::FULL_ROW_SELECT)]
     #[nwg_layout_item(layout: mylayout,col: 0, col_span: 10, row: 0, row_span: 15)]
-    #[nwg_events(OnListViewClick:[DataViewApp::select_list_action])]
+    #[nwg_events(OnListViewClick:[DataViewApp::select_list_action],
+        OnListViewColumnClick:[DataViewApp::column_click_sort(SELF,EVT_DATA)])]
     data_view: nwg::ListView,
 
     // google search
@@ -415,11 +416,11 @@ pub struct DataViewApp {
     #[nwg_events(OnButtonClick:[DataViewApp::item_search])]
     google_btn: nwg::Button,
 
-    //並べ順選択ボックス
-    #[nwg_control(font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 10, row: 1)]
-    #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
-    sort_type: nwg::ComboBox<&'static str>,
+    // //並べ順選択ボックス
+    // #[nwg_control(font: Some(&data.appfont))]
+    // #[nwg_layout_item(layout: mylayout, col: 10, row: 1)]
+    // #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
+    // sort_type: nwg::ComboBox<&'static str>,
     // // 年度
     #[nwg_control(font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 2)]
@@ -446,7 +447,7 @@ pub struct DataViewApp {
     // 購入加工選択ボックス
     #[nwg_control(font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 7)]
-    #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
+    #[nwg_events( OnComboxBoxSelection: [DataViewApp::change_parts_type] )]
     partstype: nwg::ComboBox<&'static str>,
 
     // 検索語
@@ -536,12 +537,30 @@ impl DataViewApp {
         self.konyu_data();
         self.partstype.set_collection(vec!["購入", "加工"]);
         self.partstype.set_selection(Some(0));
-        self.sort_type.set_collection(vec!["番号順", "発注順"]);
-        self.sort_type.set_selection(Some(0));
+        // self.sort_type.set_collection(vec!["番号順", "発注順"]);
+        // self.sort_type.set_selection(Some(0));
         self.set_year_select();
         self.year_input.set_selection(Some(0));
     }
 
+    fn column_click_sort(&self, event: &EventData) {
+        let (_, colnum) = event.on_list_view_item_index();
+        let colnums = (0..15).filter(|x| *x != colnum);
+        colnums.for_each(|col| self.data_view.set_column_sort_arrow(col, None));
+        // self.statuslabel2.set_text(&format!("{:?}", colnum));
+        match self.data_view.column_sort_arrow(colnum) {
+            Some(ListViewColumnSortArrow::Down) => {
+                self.data_view
+                    .set_column_sort_arrow(colnum, Some(ListViewColumnSortArrow::Up));
+                let _ = self.read_database(colnum, true);
+            }
+            _ => {
+                self.data_view
+                    .set_column_sort_arrow(colnum, Some(ListViewColumnSortArrow::Down));
+                let _ = self.read_database(colnum, false);
+            }
+        }
+    }
     fn set_year_select(&self) {
         let years = get_dbyear();
 
@@ -577,6 +596,11 @@ impl DataViewApp {
         self.google_btn.set_text("図面を開く")
     }
 
+    fn change_parts_type(&self) {
+        self.search_edit.set_text("");
+        self.update_view();
+    }
+
     fn update_view(&self) {
         if self.clear_btn.enabled() {
             let value = self.partstype.selection_string();
@@ -594,17 +618,20 @@ impl DataViewApp {
         } else {
             self.clear_btn.set_enabled(true);
         }
-        // self.search_edit.set_text("");
     }
 
     fn set_listdatabase(&self) {
-        match self.read_database() {
+        match self.read_database(0, false) {
             Ok(_) => (),
             Err(e) => self.statuslabel1.set_text(e.to_string().as_str()),
         }
     }
 
-    fn read_database(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn read_database(
+        &self,
+        sort_col: usize,
+        sort_rev: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         self.statuslabel1.set_text("");
         self.statuslabel2.set_text("");
         let dataview = &self.data_view;
@@ -650,9 +677,30 @@ impl DataViewApp {
             &orderedcheck,
         )?;
 
-        if self.sort_type.selection_string().unwrap() == "発注順" {
-            contents.sort_by_key(|k| k.order_date.to_owned());
-            contents.reverse();
+        match sort_col {
+            0 => contents.sort_by_key(|k| k.order_no.clone()),
+            1 => contents.sort_by_key(|k| k.unit_no),
+            2 => contents.sort_by_key(|k| k.parts_no.clone()),
+            3 => contents.sort_by_key(|k| k.name.clone()),
+            4 => contents.sort_by_key(|k| k.model.clone()),
+            5 => contents.sort_by_key(|k| k.maker.clone()),
+            6 => contents.sort_by_key(|k| k.itemqty),
+            7 => contents.sort_by_key(|k| k.remarks.clone()),
+            8 => contents.sort_by_key(|k| k.condition.clone()),
+            9 => contents.sort_by_key(|k| k.vender.clone()),
+            10 => contents.sort_by_key(|k| k.order_date.clone()),
+            11 => contents.sort_by_key(|k| k.delivery_date.clone()),
+            12 => contents.sort_by_key(|k| k.delicondition.clone()),
+            13 => contents.sort_by_key(|k| k.price),
+            14 => contents.sort_by_key(|k| k.price * k.itemqty),
+            _ => (),
+        }
+        // if self.sort_type.selection_string().unwrap() == "発注順" {
+        //     contents.sort_by_key(|k| k.order_date.to_owned());
+        //     contents.reverse();
+        // }
+        if sort_rev {
+            contents.reverse()
         }
 
         self.statuslabel1
