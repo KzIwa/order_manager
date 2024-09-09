@@ -416,11 +416,6 @@ pub struct DataViewApp {
     #[nwg_events(OnButtonClick:[DataViewApp::item_search])]
     google_btn: nwg::Button,
 
-    // //並べ順選択ボックス
-    // #[nwg_control(font: Some(&data.appfont))]
-    // #[nwg_layout_item(layout: mylayout, col: 10, row: 1)]
-    // #[nwg_events( OnComboxBoxSelection: [DataViewApp::update_view] )]
-    // sort_type: nwg::ComboBox<&'static str>,
     // // 年度
     #[nwg_control(font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 2)]
@@ -432,7 +427,6 @@ pub struct DataViewApp {
     #[nwg_layout_item(layout: mylayout, col: 10, row: 3)]
     orderlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont),focus:false)]
-    // #[nwg_events(OnTextInput:[DataViewApp::update_view])]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 4, row_span: 1)]
     order_input: nwg::TextInput,
 
@@ -456,7 +450,6 @@ pub struct DataViewApp {
     searchlabel: nwg::Label,
     #[nwg_control(text: "",font: Some(&data.appfont))]
     #[nwg_layout_item(layout: mylayout, col: 10, row: 9)]
-    // #[nwg_events(OnTextInput::[DataViewApp::update_view])]
     search_edit: nwg::TextInput,
 
     // 検索ボタン
@@ -537,8 +530,6 @@ impl DataViewApp {
         self.konyu_data();
         self.partstype.set_collection(vec!["購入", "加工"]);
         self.partstype.set_selection(Some(0));
-        // self.sort_type.set_collection(vec!["番号順", "発注順"]);
-        // self.sort_type.set_selection(Some(0));
         self.set_year_select();
         self.year_input.set_selection(Some(0));
     }
@@ -547,7 +538,6 @@ impl DataViewApp {
         let (_, colnum) = event.on_list_view_item_index();
         let colnums = (0..15).filter(|x| *x != colnum);
         colnums.for_each(|col| self.data_view.set_column_sort_arrow(col, None));
-        // self.statuslabel2.set_text(&format!("{:?}", colnum));
         match self.data_view.column_sort_arrow(colnum) {
             Some(ListViewColumnSortArrow::Down) => {
                 self.data_view
@@ -831,14 +821,6 @@ impl DataViewApp {
                 basefolder.push(&x)
             }
 
-            // let target_folder: Option<Vec<_>> =
-            //     target_order.and_then(|order| myfilefinder::find_folder_path(basefolder, &order));
-
-            // let items = target_folder.and_then(|dir| {
-            //     basepattern.map(move |base_p| {
-            //         myfilefinder::find_files(&dir[0], &base_p).collect::<Vec<_>>()
-            //     })
-            // });
             let items = find_drawings(basefolder, target_order, basepattern);
 
             let _result = items.map(|initems| {
