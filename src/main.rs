@@ -235,15 +235,16 @@ fn pretty_print_int(i: i32) -> String {
         .collect()
 }
 
-fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> PartsItem {
+fn excelvec_to_partsitem(ordername: &str, cellsdata: &[String], namesub: &str) -> PartsItem {
     // エクセルから読み取ったデータをPartsItem構造体に変換
 
     // dataから値を取り出すクロージャ
-    let getext = |x: usize| {
-        if data.len() < x + 1 {
+    let get_data = |x: usize| {
+        // dataをキャプチャーしている
+        if cellsdata.len() < x + 1 {
             "".to_string()
         } else {
-            data[x].to_string()
+            cellsdata[x].to_string()
         }
     };
 
@@ -261,34 +262,31 @@ fn excelvec_to_partsitem(ordername: &str, data: &[String], namesub: &str) -> Par
             None => ordernamesub.to_string() + ordername,
         },
 
-        unit_no: getext(0).parse::<i32>().unwrap_or(0),
+        unit_no: get_data(0).parse::<i32>().unwrap_or(0),
 
-        parts_no: match getext(2).split_once('-') {
+        parts_no: match get_data(2).split_once('-') {
             Some(pno) => pno.1.to_string(),
-            None => getext(2),
+            None => get_data(2),
         },
 
-        rev_mark: getext(3),
+        rev_mark: get_data(3),
 
-        name: getext(4),
-        itemtype: getext(1),
-        model: getext(5),
-        maker: getext(6),
+        name: get_data(4),
+        itemtype: get_data(1),
+        model: get_data(5),
+        maker: get_data(6),
 
-        itemqty: match getext(7).replace('計', "").parse::<i32>() {
-            Ok(num) => num,
-            _ => 0,
-        },
-        remarks: getext(8),
-        condition: getext(9),
-        vender: getext(10),
-        order_date: getext(13),
-        delivery_date: getext(14),
-        delicondition: getext(15),
-        price: match getext(11).parse::<i32>() {
-            Ok(num) => num,
-            _ => 0,
-        },
+        itemqty: get_data(7)
+            .replace('計', "")
+            .parse::<i32>()
+            .unwrap_or_default(),
+        remarks: get_data(8),
+        condition: get_data(9),
+        vender: get_data(10),
+        order_date: get_data(13),
+        delivery_date: get_data(14),
+        delicondition: get_data(15),
+        price: get_data(11).parse::<i32>().unwrap_or_default(),
     };
     parts_item
 }
@@ -313,7 +311,6 @@ fn get_dbyear() -> Result<Vec<String>, Box<dyn std::error::Error>> {
             let yearname = dbname.to_string_lossy().into_owned();
             let yearname = yearname.replace(".db3", "");
             let yearname = yearname.replace("parts", "");
-            // let nyearname = yearname[..];
             getnames.push(yearname);
         }
     }
@@ -336,6 +333,7 @@ fn read_excel_files(selectyear: i32, datapath: &Path) -> Result<usize, Box<dyn s
             for partype in ["購入", "加工"].into_iter() {
                 let pattern = format!("./**/*{partype}*.xlsx");
                 let targetfiles = glob(&pattern)?.filter_map(Result::ok);
+
                 for excelname in targetfiles {
                     // エクセルファイルのファイルパス
                     if let Ok(datavec) = readexcel(&excelname) {
@@ -800,20 +798,22 @@ impl DataViewApp {
         let listview = &self.data_view;
         let selected_year = &self.year_input.selection_string();
         let selected_row = listview.selected_item();
+        let split_pattern = &['-', '_'][..];
         let target_order = selected_row
             .and_then(|row| listview.item(row, 0, 30))
-            .map(|x| x.text.split('-').collect::<Vec<_>>()[0].to_string());
+            .map(|x| x.text.split(split_pattern).collect::<Vec<_>>()[0].to_string());
 
         let target_unit = selected_row
             .and_then(|row| listview.item(row, 1, 5))
-            .map(|x| x.text.split('-').collect::<Vec<_>>()[0].to_string());
+            .map(|x| x.text.split(split_pattern).collect::<Vec<_>>()[0].to_string());
         let target_no = selected_row
             .and_then(|row| listview.item(row, 2, 5))
-            .map(|x| x.text.split('-').collect::<Vec<_>>()[0].to_string());
+            .map(|x| x.text.split(split_pattern).collect::<Vec<_>>()[0].to_string());
 
         let basepattern = target_order.clone().and_then(|order| {
             target_unit.and_then(|unit| target_no.map(|no| order + "-" + &unit + "-" + &no))
         });
+        let target_name = basepattern.clone().unwrap();
 
         if let Ok(st) = SettingItem::new() {
             let mut basefolder = PathBuf::from(st.searchfolder);
@@ -821,22 +821,30 @@ impl DataViewApp {
                 basefolder.push(&x)
             }
 
-            let items = find_drawings(basefolder, target_order, basepattern);
+            // let items = find_drawings(basefolder, target_order, basepattern);
+            match find_drawings(basefolder, target_order, basepattern) {
+                Some(initems) => {
+                    let result = initems.map(|it| opendir(&it, true)).collect::<Vec<_>>();
+                    result.iter().for_each(|x| {
+                        if let Err(e) = x {
+                            self.statuslabel2.set_text(&format!("{:?}", e))
+                        } else {
+                            self.statuslabel2
+                                .set_text(&format!("{:?} 図面を開きました", target_name))
+                        }
+                    });
+                }
+                None => self.statuslabel1.set_text("検索エラー"),
+            }
 
-            let _result = items.map(|initems| {
-                let _ = initems
-                    .iter()
-                    .map(|it| opendir(it, true))
-                    .collect::<Vec<_>>();
-                self.statuslabel2.set_text(&format!(
-                    "{:?}を開きました",
-                    initems
-                        .iter()
-                        .map(|f| f.file_name().unwrap())
-                        .collect::<Vec<_>>()
-                ))
-            });
-        };
+            // if let Some(initems) = items {
+            //     let _ = initems
+            //         // .iter()
+            //         .map(|it| opendir(&it, true))
+            //         .collect::<Vec<_>>();
+            //     self.statuslabel2
+            //         .set_text(&format!("{:?}を開きました", target_name))
+        }
     }
 
     fn google_search(&self) {
@@ -848,7 +856,7 @@ impl DataViewApp {
                 let maker = listview.item(row, 5, 20).unwrap().text;
                 let mut searchword: String = String::new();
 
-                let open_url = match maker.to_lowercase().as_str() {
+                let maker_url = match maker.to_lowercase().as_str() {
                     "ミスミ" => {
                         searchword = model.to_string();
                         let itemurl = format!(
@@ -885,13 +893,15 @@ impl DataViewApp {
                 let google_searchword = format!("{model} {maker}");
                 let google_url = format!("https://www.google.com/search?q={google_searchword}");
 
-                if let Some(ourl) = open_url {
+                if let Some(ourl) = maker_url {
+                    // メーカーの検索URLが存在する場合
                     if is_valid_url(&ourl) {
                         self.open_mybrowser(&ourl, &searchword);
                     } else {
                         self.open_mybrowser(&google_url, &google_searchword);
                     }
                 } else {
+                    // メーカーの検索URLが存在しない場合はgoogle検索
                     self.open_mybrowser(&google_url, &google_searchword)
                 };
             }
@@ -952,17 +962,16 @@ fn find_drawings(
     basefolder: PathBuf,
     target_order: Option<String>,
     basepattern: Option<String>,
-) -> Option<Vec<PathBuf>> {
+    // ) -> Option<Vec<PathBuf>> {
+) -> Option<impl Iterator<Item = PathBuf>> {
     let target_folder: Option<Vec<_>> =
         target_order.and_then(|order| myfilefinder::find_folder_path(basefolder, &order));
 
-    target_folder.and_then(|dir| {
-        basepattern.map(move |base_p| {
-            myfilefinder::files_search(dir[0].clone(), &base_p)
-                .unwrap()
-                .collect::<Vec<_>>()
+    target_folder
+        .and_then(|dir| {
+            basepattern.map(move |base_p| myfilefinder::files_search(dir[0].clone(), &base_p))
         })
-    })
+        .flatten()
 }
 
 fn opendir(fpath: &PathBuf, is_open_file: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -979,18 +988,18 @@ fn opendir(fpath: &PathBuf, is_open_file: bool) -> Result<(), Box<dyn std::error
         Ok(())
     } else {
         // 対象ファイルのフォルダをファインダーで開く
+        let filepath = match fpath.parent() {
+            Some(f) => f,
+            None => return Err("ファイルパスが不正です".into()),
+        };
         #[cfg(target_os = "macos")]
-        Command::new("open").arg(fpath.parent().unwrap()).spawn()?;
+        Command::new("open").arg(filepath).spawn()?;
 
         #[cfg(target_os = "windows")]
-        Command::new("explorer")
-            .arg(fpath.parent().unwrap())
-            .spawn()?;
+        Command::new("explorer").arg(filepath).spawn()?;
 
         #[cfg(target_os = "linux")]
-        Command::new("xdg-open")
-            .arg(fpath.parent().unwrap())
-            .spawn()?;
+        Command::new("xdg-open").arg(filepath).spawn()?;
         Ok(())
     }
 }

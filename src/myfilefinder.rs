@@ -2,7 +2,6 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::PathBuf;
 
-/// 指定されたベースパターンを元に、揺らぎのある正規表現を生成する関数
 fn generate_fuzzy_pattern(base_pattern: &str) -> Option<(String, u32, u32)> {
     let parts: Vec<_> = base_pattern.split(&['-', '_'][..]).collect();
     if parts.len() < 3 {
@@ -47,7 +46,7 @@ fn is_match_item(target: Option<&OsStr>, pattern_file: &Option<(String, u32, u32
 pub fn files_search(
     basepath: PathBuf,
     base_pattern: &str,
-) -> Result<impl Iterator<Item = PathBuf>, Box<dyn std::error::Error>> {
+) -> Option<impl Iterator<Item = PathBuf>> {
     let base_pattern = generate_fuzzy_pattern(base_pattern);
     let itempattern = match base_pattern.clone() {
         Some(pt) => {
@@ -57,15 +56,17 @@ pub fn files_search(
     };
     let builder = globmatch::Builder::new(&itempattern)
         .case_sensitive(false)
-        .build(basepath)?;
+        .build(basepath);
 
-    let prebuilder = builder
-        .into_iter()
-        .filter(|x| x.is_ok())
-        .flatten()
-        .filter(move |f| is_match_item(f.file_name(), &base_pattern));
-
-    Ok(prebuilder)
+    match builder {
+        Ok(bld) => Some(
+            bld.into_iter()
+                .filter(|x| x.is_ok())
+                .flatten()
+                .filter(move |f| is_match_item(f.file_name(), &base_pattern)),
+        ),
+        Err(_) => None,
+    }
 }
 
 pub fn find_folder_path(root: PathBuf, target_str: &str) -> Option<Vec<PathBuf>> {
