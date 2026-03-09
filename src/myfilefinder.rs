@@ -45,9 +45,9 @@ fn is_match_item(target: Option<&OsStr>, pattern_file: &Option<(String, u32, u32
 
 pub fn files_search(
     basepath: PathBuf,
-    base_pattern: &str,
+    base_pattern: String,
 ) -> Option<impl Iterator<Item = PathBuf>> {
-    let base_pattern = generate_fuzzy_pattern(base_pattern);
+    let base_pattern = generate_fuzzy_pattern(&base_pattern);
     let itempattern = match base_pattern.clone() {
         Some(pt) => {
             format!("./**/*{}*{}*{}*.{}", pt.0, pt.1, pt.2, "pdf")
@@ -71,7 +71,8 @@ pub fn files_search(
 
 pub fn find_folder_path(root: PathBuf, target_str: &str) -> Option<Vec<PathBuf>> {
     // rootに1層目にあるtarget_strを含むフォルダを探す
-    let result = match fs::read_dir(root) {
+
+    match fs::read_dir(root) {
         Ok(entries) => Some(
             entries
                 .flatten()
@@ -84,7 +85,5 @@ pub fn find_folder_path(root: PathBuf, target_str: &str) -> Option<Vec<PathBuf>>
                 .collect::<Vec<_>>(),
         ),
         Err(_) => None,
-    };
-
-    result
+    }
 }

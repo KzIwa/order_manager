@@ -219,9 +219,9 @@ fn pretty_print_int(i: i32) -> String {
     let strlen = i_str.len();
 
     let do_insert_comma = |idx, val: char| {
-        let pos = strlen - idx - 1;
+        let pos: usize = strlen - idx - 1;
 
-        if pos != 0 && pos % 3 == 0 {
+        if pos != 0 && pos.is_multiple_of(3) {
             val.to_string() + ","
         } else {
             val.to_string()
@@ -253,7 +253,7 @@ fn excelvec_to_partsitem(ordername: &str, cellsdata: &[String], namesub: &str) -
         None => namesub,
     };
 
-    let parts_item = PartsItem {
+    PartsItem {
         order_no: match ordername.split_once('_') {
             Some(name) => match name.1.split_once('_') {
                 Some(n) => ordernamesub.to_string() + n.1,
@@ -287,8 +287,7 @@ fn excelvec_to_partsitem(ordername: &str, cellsdata: &[String], namesub: &str) -
         delivery_date: get_data(14),
         delicondition: get_data(15),
         price: get_data(11).parse::<i32>().unwrap_or_default(),
-    };
-    parts_item
+    }
 }
 
 fn delete_db_file(datapath: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -413,6 +412,12 @@ pub struct DataViewApp {
     #[nwg_layout_item(layout:mylayout,col: 10,row:0)]
     #[nwg_events(OnButtonClick:[DataViewApp::item_search])]
     google_btn: nwg::Button,
+
+    // オーダーのフォルダを開く
+    #[nwg_control(text:"フォルダを開く",size:(270,40))]
+    #[nwg_layout_item(layout:mylayout,col: 10,row:1)]
+    #[nwg_events(OnButtonClick:[DataViewApp::folder_open])]
+    opendir_btn: nwg::Button,
 
     // // 年度
     #[nwg_control(font: Some(&data.appfont))]
@@ -684,10 +689,6 @@ impl DataViewApp {
             14 => contents.sort_by_key(|k| k.price * k.itemqty),
             _ => (),
         }
-        // if self.sort_type.selection_string().unwrap() == "発注順" {
-        //     contents.sort_by_key(|k| k.order_date.to_owned());
-        //     contents.reverse();
-        // }
         if sort_rev {
             contents.reverse()
         }
@@ -772,10 +773,7 @@ impl DataViewApp {
         // get row
         let selectrow = listview.selected_item();
         if let Some(row) = selectrow {
-            // Some(row) => {
             // 選択行の注番をセット
-            // let items = listview.item(row, 0, 20).unwrap().text;
-            // self.order_input.set_text(&items);
             let linesize = 80;
             let model = listview.item(row, 4, linesize).unwrap().text;
             self.model_edit.set_text(&model);
@@ -836,14 +834,33 @@ impl DataViewApp {
                 }
                 None => self.statuslabel1.set_text("検索エラー"),
             }
+        }
+    }
 
-            // if let Some(initems) = items {
-            //     let _ = initems
-            //         // .iter()
-            //         .map(|it| opendir(&it, true))
-            //         .collect::<Vec<_>>();
-            //     self.statuslabel2
-            //         .set_text(&format!("{:?}を開きました", target_name))
+    fn folder_open(&self) {
+        let listview = &self.data_view;
+        let selected_year = &self.year_input.selection_string();
+        let selected_row = listview.selected_item();
+        let split_pattern = &['-', '_'][..];
+        let target_order = selected_row
+            .and_then(|row| listview.item(row, 0, 30))
+            .map(|x| x.text.split(split_pattern).collect::<Vec<_>>()[0].to_string());
+
+        if let Ok(st) = SettingItem::new() {
+            let mut basefolder = PathBuf::from(st.searchfolder);
+            if let Some(x) = selected_year.clone() {
+                basefolder.push(&x)
+            }
+
+            match find_folder(basefolder, target_order.clone()) {
+                Some(initems) => match opendir(&initems, false) {
+                    Ok(_) => self
+                        .statuslabel2
+                        .set_text(&format!("{:?} フォルダを開きました", target_order.unwrap())),
+                    Err(e) => self.statuslabel1.set_text(&format!("{:?}", e)),
+                },
+                None => self.statuslabel1.set_text("検索エラー"),
+            }
         }
     }
 
@@ -860,8 +877,8 @@ impl DataViewApp {
                     "ミスミ" => {
                         searchword = model.to_string();
                         let itemurl = format!(
-                        "https://jp.misumi-ec.com/vona2/result/?Keyword={searchword}+&isReSearch=0"
-                    );
+                            "https://jp.misumi-ec.com/vona2/result/?Keyword={searchword}+&isReSearch=0"
+                        );
                         Some(itemurl)
                     }
                     "sus" => {
@@ -884,7 +901,9 @@ impl DataViewApp {
                     }
                     "smc" => {
                         searchword = model.to_string();
-                        let itemurl =format!("https://www.smcworld.com/gsearch/ja-jp/search?query={searchword}&lang=ja_JP");
+                        let itemurl = format!(
+                            "https://www.smcworld.com/gsearch/ja-jp/search?query={searchword}&lang=ja_JP"
+                        );
                         Some(itemurl)
                     }
                     _ => None,
@@ -962,16 +981,22 @@ fn find_drawings(
     basefolder: PathBuf,
     target_order: Option<String>,
     basepattern: Option<String>,
-    // ) -> Option<Vec<PathBuf>> {
 ) -> Option<impl Iterator<Item = PathBuf>> {
     let target_folder: Option<Vec<_>> =
         target_order.and_then(|order| myfilefinder::find_folder_path(basefolder, &order));
 
     target_folder
         .and_then(|dir| {
-            basepattern.map(move |base_p| myfilefinder::files_search(dir[0].clone(), &base_p))
+            basepattern
+                .map(move |base_p| myfilefinder::files_search(dir[0].clone(), base_p.clone()))
         })
         .flatten()
+}
+
+fn find_folder(basefolder: PathBuf, target_order: Option<String>) -> Option<PathBuf> {
+    let target_folder =
+        target_order.and_then(|order| myfilefinder::find_folder_path(basefolder, &order));
+    target_folder.map(|folders| folders[0].clone())
 }
 
 fn opendir(fpath: &PathBuf, is_open_file: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -988,18 +1013,18 @@ fn opendir(fpath: &PathBuf, is_open_file: bool) -> Result<(), Box<dyn std::error
         Ok(())
     } else {
         // 対象ファイルのフォルダをファインダーで開く
-        let filepath = match fpath.parent() {
-            Some(f) => f,
-            None => return Err("ファイルパスが不正です".into()),
-        };
+        // let filepath = match fpath.parent() {
+        //     Some(f) => f,
+        //     None => return Err("ファイルパスが不正です".into()),
+        // };
         #[cfg(target_os = "macos")]
-        Command::new("open").arg(filepath).spawn()?;
+        Command::new("open").arg(fpath).spawn()?;
 
         #[cfg(target_os = "windows")]
-        Command::new("explorer").arg(filepath).spawn()?;
+        Command::new("explorer").arg(fpath).spawn()?;
 
         #[cfg(target_os = "linux")]
-        Command::new("xdg-open").arg(filepath).spawn()?;
+        Command::new("xdg-open").arg(fpath).spawn()?;
         Ok(())
     }
 }

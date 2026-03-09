@@ -2,3 +2,5 @@
 *.URL
 *.db3
 *.xlsx
+*.xml
+*.iml

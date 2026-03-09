@@ -22,11 +22,9 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>, Box<dyn std::er
                 if exlinedata.len() > 5 && !exlinedata[4].is_empty() {
                     match exlinedata[1].trim() {
                         "加工" | "購入" => {
-                            if exlinedata[0].is_empty() {
-                                if let Some(unit_no) = rng.get_value((3, 2)) {
-                                    if let Some(unit_no) = parse_celldata(unit_no) {
-                                        exlinedata[0] = unit_no;
-                                    }
+                            if exlinedata[0].is_empty() && rng.get_value((3, 2)).and_then(parse_celldata).is_some() {
+                                if let Some(unit_no) = rng.get_value((3, 2)).and_then(parse_celldata) {
+                                    exlinedata[0] = unit_no;
                                 };
                             };
                             if !content_data.contains(&exlinedata) {
