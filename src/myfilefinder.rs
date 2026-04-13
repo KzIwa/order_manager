@@ -8,6 +8,7 @@ fn generate_fuzzy_pattern(base_pattern: &str) -> Option<(String, u32, u32)> {
         return None;
     }
 
+    // 文字列から数字を抜き取るクロージャ
     let to_digit = |st: &str| {
         st.chars()
             .take_while(|x| x.is_ascii_digit())
@@ -20,9 +21,11 @@ fn generate_fuzzy_pattern(base_pattern: &str) -> Option<(String, u32, u32)> {
     } else {
         0
     };
+
     let part1 = parts[head_index];
     let part2 = to_digit(parts[head_index + 1]);
     let part3 = to_digit(parts[head_index + 2]);
+
     match (part2, part3) {
         (Ok(p2), Ok(p3)) => Some((part1.to_string(), p2, p3)),
         _ => None,

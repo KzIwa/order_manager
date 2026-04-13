@@ -10,14 +10,16 @@ embed-manifest = "1.5.0"
 [dependencies]
 native-windows-gui = "1.0.13"
 native-windows-derive = "1.0.5"
-rusqlite = { version = "0.38.0", features = ["bundled"] }
-calamine = "0.33.0"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+calamine = "0.34.0"
 glob = "0.3.3"
 # chronoのバージョンアップは注意。不可逆的なダメージを負ったことがある
 # build-devependenciesにembed-manifest 1.3.1を追加して解決
-chrono = "0.4.43"
+chrono = "0.4.44"
 
 # webbrowser 0.8.0　~ 0.8.4系ではクラッシュが発生している
-webbrowser = "1.1.0"
+webbrowser = "1.2.0"
 url = "2.5.8"
 globmatch = "0.3.1"
+csv = "1.4.0"
+dirs = "5.0"

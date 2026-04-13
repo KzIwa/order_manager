@@ -7,6 +7,8 @@ mod myexcelread;
 mod myfilefinder;
 mod robocopy;
 
+use chrono::Local;
+use csv::Writer;
 use glob::glob;
 use mydatabase::{createtable, insertsql, order_readsql, PartsItem};
 use myexcelread::readexcel;
@@ -14,7 +16,8 @@ use nwd::NwgUi;
 use nwg::{EventData, ListViewColumnSortArrow, NativeUi};
 use robocopy::diffcopy;
 use std::collections::HashMap;
-use std::io::{BufReader, Read};
+use std::fs::File;
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -487,12 +490,12 @@ pub struct DataViewApp {
 
     // ステータスバー1
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 1,col_span:3, row: 15)]
+    #[nwg_layout_item(layout: mylayout, col: 2,col_span:5, row: 15)]
     statuslabel1: nwg::Label,
 
     // ステータスバー2
     #[nwg_control(text: "Status",font: Some(&data.appfont))]
-    #[nwg_layout_item(layout: mylayout, col: 6,col_span:3, row: 15)]
+    #[nwg_layout_item(layout: mylayout, col: 8,col_span:2, row: 15)]
     statuslabel2: nwg::Label,
 
     // Reloadボタン
@@ -500,6 +503,11 @@ pub struct DataViewApp {
     #[nwg_layout_item(layout:mylayout,col:0,row:15)]
     #[nwg_events(OnButtonClick:[DataViewApp::open_dialog])]
     reload_btn: nwg::Button,
+    // CSVボタン
+    #[nwg_control(text:"CSV Output",size:(270,40))]
+    #[nwg_layout_item(layout:mylayout,col:1,row:15)]
+    #[nwg_events(OnButtonClick:[DataViewApp::export_to_csv])]
+    csv_btn: nwg::Button,
 }
 
 impl DataViewApp {
@@ -966,7 +974,131 @@ impl DataViewApp {
             self.year_input.set_selection(getyear);
         }
     }
+
+    fn export_to_csv(&self) {
+        let dataview = &self.data_view;
+        let item_count = dataview.len();
+
+        if item_count == 0 {
+            self.statuslabel1
+                .set_text("エクスポートするアイテムがありません");
+            return;
+        }
+
+        // 注文番号を取得
+        let order_name = self.order_input.text();
+        let order_name_sanitized = if order_name.is_empty() {
+            "all".to_string()
+        } else {
+            // ファイル名に使用できない文字を削除
+            order_name
+                .chars()
+                .filter(|c| !r#"<>:"/\|?*"#.contains(*c))
+                .collect()
+        };
+        // 検索語を取得
+        let search_word = self.search_edit.text();
+        let search_word_sanitized = if search_word.is_empty() {
+            "all".to_string()
+        } else {
+            // ファイル名に使用できない文字を削除
+            search_word
+                .chars()
+                .filter(|c| !r#"<>:"/\|?*"#.contains(*c))
+                .collect()
+        };
+
+        // ファイル名にタイムスタンプを付与
+        let now = Local::now();
+        let filename = format!(
+            "{}_{}_{}.csv",
+            order_name_sanitized,
+            search_word_sanitized,
+            now.format("%Y%m%d_%H%M%S")
+        );
+
+        // ダウンロードフォルダを取得
+        let filepath = if let Some(download_dir) = dirs::download_dir() {
+            download_dir.join(&filename)
+        } else {
+            // フォールバック：Databaseフォルダ
+            PathBuf::from("C:\\Database").join(&filename)
+        };
+
+        match File::create(&filepath) {
+            Ok(file) => match self.write_csv_file(dataview, file, item_count) {
+                Ok(_) => {
+                    let message = format!(
+                        "{}件を{}にエクスポートしました ",
+                        item_count,
+                        filepath.display()
+                    );
+                    self.statuslabel2.set_text("");
+                    self.statuslabel1.set_text(&message);
+                }
+                Err(e) => {
+                    self.statuslabel1
+                        .set_text(&format!("エクスポートエラー: {}", e));
+                    self.statuslabel2.set_text("");
+                }
+            },
+            Err(e) => {
+                self.statuslabel1
+                    .set_text(&format!("ファイル作成エラー: {}", e));
+                self.statuslabel2.set_text("");
+            }
+        }
+    }
+
+    fn write_csv_file(
+        &self,
+        dataview: &nwg::ListView,
+        file: std::fs::File,
+        item_count: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // BOM (Byte Order Mark) を書き込み
+        let mut file = file;
+        file.write_all(&[0xEF, 0xBB, 0xBF])?;
+
+        let mut writer = Writer::from_writer(file);
+
+        // ヘッダーを書き込み
+        writer.write_record([
+            "注番",
+            "枝番",
+            "番号",
+            "部品名称",
+            "材質/型式",
+            "処理/メーカ",
+            "数量",
+            "備考",
+            "発注状況",
+            "発注先",
+            "発注日",
+            "予定納期",
+            "入荷済み",
+            "単価",
+            "金額",
+        ])?;
+
+        // 各行のデータを書き込み
+        for row_idx in 0..item_count {
+            let mut row_data = Vec::new();
+            for col_idx in 0..15 {
+                let cell_text = dataview
+                    .item(row_idx, col_idx, 200)
+                    .map(|item| item.text)
+                    .unwrap_or_default();
+                row_data.push(cell_text);
+            }
+            writer.write_record(&row_data)?;
+        }
+
+        writer.flush()?;
+        Ok(())
+    }
 }
+
 fn is_valid_url(url_str: &str) -> bool {
     match Url::parse(url_str) {
         Ok(url) => {
