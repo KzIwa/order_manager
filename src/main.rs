@@ -996,10 +996,21 @@ impl DataViewApp {
                 .filter(|c| !r#"<>:"/\|?*"#.contains(*c))
                 .collect()
         };
+        //枝番を取得
+        let branch_name = self.unit_input.text();
+        let branch_name_sanitized = if branch_name.is_empty() {
+            "".to_string()
+        } else {
+            // ファイル名に使用できない文字を削除
+            branch_name
+                .chars()
+                .filter(|c| !r#"<>:"/\|?*"#.contains(*c))
+                .collect()
+        };
         // 検索語を取得
         let search_word = self.search_edit.text();
         let search_word_sanitized = if search_word.is_empty() {
-            "all".to_string()
+            "".to_string()
         } else {
             // ファイル名に使用できない文字を削除
             search_word
@@ -1011,10 +1022,11 @@ impl DataViewApp {
         // ファイル名にタイムスタンプを付与
         let now = Local::now();
         let filename = format!(
-            "{}_{}_{}.csv",
+            "{}_{}_{}_{}.csv",
             order_name_sanitized,
+            branch_name_sanitized,
             search_word_sanitized,
-            now.format("%Y%m%d_%H%M%S")
+            now.format("%m%d_%H%M")
         );
 
         // ダウンロードフォルダを取得
@@ -1035,6 +1047,13 @@ impl DataViewApp {
                     );
                     self.statuslabel2.set_text("");
                     self.statuslabel1.set_text(&message);
+                    let download_dir = dirs::download_dir();
+                    opendir(&download_dir.unwrap(), false).unwrap_or_else(|e| {
+                        self.statuslabel2.set_text(&format!(
+                            "エクスポート成功、ファイルを開く際にエラー: {}",
+                            e
+                        ));
+                    });
                 }
                 Err(e) => {
                     self.statuslabel1
@@ -1072,11 +1091,11 @@ impl DataViewApp {
             "処理/メーカ",
             "数量",
             "備考",
-            "発注状況",
-            "発注先",
-            "発注日",
-            "予定納期",
-            "入荷済み",
+            // "発注状況",
+            // "発注先",
+            // "発注日",
+            // "予定納期",
+            // "入荷済み",
             "単価",
             "金額",
         ])?;
@@ -1085,11 +1104,15 @@ impl DataViewApp {
         for row_idx in 0..item_count {
             let mut row_data = Vec::new();
             for col_idx in 0..15 {
-                let cell_text = dataview
-                    .item(row_idx, col_idx, 200)
-                    .map(|item| item.text)
-                    .unwrap_or_default();
-                row_data.push(cell_text);
+                if col_idx == 8 || col_idx == 9 || col_idx == 10 || col_idx == 11 || col_idx == 12 {
+                    continue; // 発注状況、発注先、発注日、予定納期、入荷済みはスキップ
+                } else {
+                    let cell_text = dataview
+                        .item(row_idx, col_idx, 200)
+                        .map(|item| item.text)
+                        .unwrap_or_default();
+                    row_data.push(cell_text);
+                }
             }
             writer.write_record(&row_data)?;
         }
