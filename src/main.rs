@@ -680,21 +680,22 @@ impl DataViewApp {
         )?;
 
         match sort_col {
-            0 => contents.sort_by_key(|k| k.order_no.clone()),
-            1 => contents.sort_by_key(|k| k.unit_no),
-            2 => contents.sort_by_key(|k| k.parts_no.clone()),
-            3 => contents.sort_by_key(|k| k.name.clone()),
-            4 => contents.sort_by_key(|k| k.model.clone()),
-            5 => contents.sort_by_key(|k| k.maker.clone()),
-            6 => contents.sort_by_key(|k| k.itemqty),
-            7 => contents.sort_by_key(|k| k.remarks.clone()),
-            8 => contents.sort_by_key(|k| k.condition.clone()),
-            9 => contents.sort_by_key(|k| k.vender.clone()),
-            10 => contents.sort_by_key(|k| k.order_date.clone()),
-            11 => contents.sort_by_key(|k| k.delivery_date.clone()),
-            12 => contents.sort_by_key(|k| k.delicondition.clone()),
-            13 => contents.sort_by_key(|k| k.price),
-            14 => contents.sort_by_key(|k| k.price * k.itemqty),
+            // 0 => contents.sort_by_key(|k| k.order_no.clone()),
+            0 => contents.sort_by(|a, b| a.order_no.cmp(&b.order_no)),
+            1 => contents.sort_unstable_by_key(|k| k.unit_no),
+            2 => contents.sort_by(|a, b| a.parts_no.cmp(&b.parts_no)),
+            3 => contents.sort_by(|a, b| a.name.cmp(&b.name)),
+            4 => contents.sort_by(|a, b| a.model.cmp(&b.model)),
+            5 => contents.sort_by(|a, b| a.maker.cmp(&b.maker)),
+            6 => contents.sort_unstable_by_key(|k| k.itemqty),
+            7 => contents.sort_by(|a, b| a.remarks.cmp(&b.remarks)),
+            8 => contents.sort_by(|a, b| a.condition.cmp(&b.condition)),
+            9 => contents.sort_by(|a, b| a.vender.cmp(&b.vender)),
+            10 => contents.sort_by(|a, b| a.order_date.cmp(&b.order_date)),
+            11 => contents.sort_by(|a, b| a.delivery_date.cmp(&b.delivery_date)),
+            12 => contents.sort_by(|a, b| a.delicondition.cmp(&b.delicondition)),
+            13 => contents.sort_unstable_by_key(|k| k.price),
+            14 => contents.sort_unstable_by_key(|k| k.price * k.itemqty),
             _ => (),
         }
         if sort_rev {
@@ -703,7 +704,6 @@ impl DataViewApp {
 
         self.statuslabel1
             .set_text(format!("{}→{}件の該当項目があります", search_word, contents.len()).as_str());
-        let mut has_zero = false;
 
         let settingitem = SettingItem::new();
 
@@ -727,36 +727,43 @@ impl DataViewApp {
             ]
         };
 
+        let has_zero = contents.iter().any(|it| {
+            it.price * it.itemqty == 0 && it.name.trim() != "欠番" && !it.remarks.contains("支給品")
+        });
+
         match settingitem {
             Ok(st) => {
                 self.search_btn.set_enabled(false);
                 let listlimit = st.maxdisplay_linenumber;
-                let dataview = &self.data_view;
-                // guiにアイテムをセット
+                // let dataview = &self.data_view;
+
+                self.data_view.set_redraw(false); // 3. 0円チェックも全件に対して事前に行う（必要なら）
+                                                  // guiにアイテムをセット
                 contents
                     .iter()
                     .take(listlimit)
                     .enumerate()
                     .for_each(|(indexnum, items)| {
                         let gpartprice = items.price * items.itemqty;
-                        if gpartprice == 0
-                            && items.name.trim() != "欠番"
-                            && !items.remarks.contains("支給品")
-                        {
-                            has_zero = true
-                        };
+                        // if gpartprice == 0
+                        //     && items.name.trim() != "欠番"
+                        //     && !items.remarks.contains("支給品")
+                        // {
+                        //     has_zero = true
+                        // };
                         grossprice += gpartprice;
 
                         // GUIの表の構成
                         let toitem = to_list_item(items, gpartprice);
-                        dataview.insert_items_row(Some(indexnum as i32), &toitem);
+                        self.data_view
+                            .insert_items_row(Some(indexnum as i32), &toitem);
                     });
 
                 if contents.len() > listlimit {
                     self.statuslabel1
                         .set_text(format!("{listlimit}件までを表示しています。").as_str());
                 }
-
+                self.data_view.set_redraw(true);
                 self.search_btn.set_enabled(true);
             }
             Err(_) => self
@@ -1023,19 +1030,21 @@ impl DataViewApp {
         let now = Local::now();
         let filename = format!(
             "{}_{}_{}_{}.csv",
-            order_name_sanitized,
-            branch_name_sanitized,
-            search_word_sanitized,
+            order_name_sanitized.replace(" ", "_"),
+            branch_name_sanitized.replace(" ", "_"),
+            search_word_sanitized.replace(" ", "_"),
             now.format("%m%d_%H%M")
         );
 
         // ダウンロードフォルダを取得
-        let filepath = if let Some(download_dir) = dirs::download_dir() {
-            download_dir.join(&filename)
+        let download_path = if let Some(download_dir) = dirs::download_dir() {
+            download_dir
         } else {
             // フォールバック：Databaseフォルダ
-            PathBuf::from("C:\\Database").join(&filename)
+            PathBuf::from("C:\\Database")
         };
+
+        let filepath = download_path.join(&filename);
 
         match File::create(&filepath) {
             Ok(file) => match self.write_csv_file(dataview, file, item_count) {
@@ -1047,8 +1056,7 @@ impl DataViewApp {
                     );
                     self.statuslabel2.set_text("");
                     self.statuslabel1.set_text(&message);
-                    let download_dir = dirs::download_dir();
-                    opendir(&download_dir.unwrap(), false).unwrap_or_else(|e| {
+                    opendir(&download_path, false).unwrap_or_else(|e| {
                         self.statuslabel2.set_text(&format!(
                             "エクスポート成功、ファイルを開く際にエラー: {}",
                             e

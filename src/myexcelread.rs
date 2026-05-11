@@ -1,4 +1,4 @@
-use calamine::{open_workbook, Data, Reader, Xlsx};
+use calamine::{Data, Reader, Xlsx, open_workbook};
 use chrono::{Duration, NaiveDate};
 use std::path::PathBuf;
 
@@ -22,10 +22,12 @@ pub fn readexcel(filename: &PathBuf) -> Result<Vec<Vec<String>>, Box<dyn std::er
                 if exlinedata.len() > 5 && !exlinedata[4].is_empty() {
                     match exlinedata[1].trim() {
                         "加工" | "購入" => {
-                            if exlinedata[0].is_empty() && rng.get_value((3, 2)).and_then(parse_celldata).is_some() {
-                                if let Some(unit_no) = rng.get_value((3, 2)).and_then(parse_celldata) {
-                                    exlinedata[0] = unit_no;
-                                };
+                            if exlinedata[0].is_empty()
+                                && rng.get_value((3, 2)).and_then(parse_celldata).is_some()
+                                && let Some(unit_no) =
+                                    rng.get_value((3, 2)).and_then(parse_celldata)
+                            {
+                                exlinedata[0] = unit_no;
                             };
                             if !content_data.contains(&exlinedata) {
                                 content_data.push(exlinedata);
