@@ -23,6 +23,7 @@ fn robocopy(selectdir: &str, select_localdir: &str) -> Result<(), Box<dyn std::e
             "/XO",
             "/xf",
             "~$*",
+            "/MT:8", //マルチスレッドでコピーするオプション
         ])
         .output()?;
     println!("{}", result.status);
